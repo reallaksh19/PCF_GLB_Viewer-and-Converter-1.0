@@ -14,9 +14,10 @@ import { state } from './core/state.js';
 let CURRENT_VERTICAL_AXIS = 'Z';
 
 function _verticalVector() {
-    return CURRENT_VERTICAL_AXIS === 'Z'
-        ? new THREE.Vector3(0, 0, 1)
-        : new THREE.Vector3(0, 1, 0);
+    // mapCoord() always maps the PCF elevation axis (Z or Y depending on CURRENT_VERTICAL_AXIS)
+    // into Three.js Y.  The camera "up" vector must therefore always be Three.js Y (0,1,0).
+    // Returning (0,0,1) for Z-up was wrong: it conflicted with mapCoord and inverted the view.
+    return new THREE.Vector3(0, 1, 0);
 }
 
 function _verticalComponent(parts) {
@@ -48,6 +49,16 @@ const mapCoord = (p) => {
     }
     return new THREE.Vector3(-p.y, p.z, -p.x);
 };
+
+const OVERLAY_LAYER_IDS = Object.freeze({
+    LEGEND: 'legend',
+    MESSAGE_CIRCLE: 'message-circle',
+    MESSAGE_SQUARE: 'message-square',
+    LENGTH: 'length',
+    MEASURE: 'measure',
+    SPARE_1: 'spare1',
+    SPARE_2: 'spare2',
+});
 
 // ── Cylinder helper ────────────────────────────────────────────────
 function createCylinder(startVec, endVec, radius, color, materialOverride = null) {
@@ -146,8 +157,8 @@ function _supportKindFromText(text = '') {
     const t = String(text).toUpperCase();
     if (/\bCA100\b/.test(t)) return 'GUIDE';
     if (/\bCA150\b|\bCA250\b/.test(t)) return 'REST';
-    if (/(^|[^A-Z0-9])(RIGID\s+)?ANC(HOR)?([^A-Z0-9]|$)|\bFIXED\b/.test(t)) return 'ANCHOR';
-    if (/\bGDE\b|\bGUI\b|GUIDE|SLIDE|SLID/.test(t)) return 'GUIDE';
+    if (/(^|[^A-Z0-9])(RIGID\s+)?ANC(HOR)?([^A-Z0-9]|$)|\bFIX(ED)?\b/.test(t)) return 'ANCHOR';
+    if (/\bGDE\b|\bGUI\b|\bGD\b|GUIDE|SLIDE|SLID/.test(t)) return 'GUIDE';
     if (/\bRST\b|\bREST\b|\+Y\s*SUPPORT|\bY\s*SUPPORT\b|\+Y\b/.test(t)) return 'REST';
     if (/\bSTOP\b/.test(t)) return 'STOP';
     if (/\bSPRING\b|\bHANGER\b/.test(t)) return 'SPRING';
@@ -162,6 +173,53 @@ function _supportKindFromToken(token = '') {
     if (t === 'RST' || t === 'REST') return 'REST';
     if (t === 'SPRING') return 'SPRING';
     if (t === 'STOP' || t === 'STP') return 'STOP';
+    return null;
+}
+
+function _supportTextFromAttributes(attrs) {
+    const src = attrs && typeof attrs === 'object' ? attrs : {};
+    return [
+        src.SUPPORT_TAG,
+        src['SUPPORT-TAG'],
+        src.SUPPORT_DIRECTION,
+        src['SUPPORT-DIRECTION'],
+        src.SKEY,
+        src.SUPPORT_NAME,
+        src['SUPPORT-NAME'],
+        src['<SUPPORT_NAME>'],
+        src['COMPONENT-IDENTIFIER'],
+        src['COMPONENT-ATTRIBUTE1'],
+        src['COMPONENT-ATTRIBUTE2'],
+    ].map(value => String(value || '').toUpperCase()).join(' ');
+}
+
+function _supportDirectionFromText(text = '') {
+    const t = String(text || '').toUpperCase();
+    if (/\bNORTHEAST\b|\bNORTH-EAST\b|\bNE\b/.test(t)) return 'NORTHEAST';
+    if (/\bNORTHWEST\b|\bNORTH-WEST\b|\bNW\b/.test(t)) return 'NORTHWEST';
+    if (/\bSOUTHEAST\b|\bSOUTH-EAST\b|\bSE\b/.test(t)) return 'SOUTHEAST';
+    if (/\bSOUTHWEST\b|\bSOUTH-WEST\b|\bSW\b/.test(t)) return 'SOUTHWEST';
+    if (/\bUP\b/.test(t)) return 'UP';
+    if (/\bDOWN\b/.test(t)) return 'DOWN';
+    if (/\bNORTH\b/.test(t)) return 'NORTH';
+    if (/\bSOUTH\b/.test(t)) return 'SOUTH';
+    if (/\bEAST\b/.test(t)) return 'EAST';
+    if (/\bWEST\b/.test(t)) return 'WEST';
+    return '';
+}
+
+function _axisFromSupportDirection(direction) {
+    const d = String(direction || '').toUpperCase();
+    if (d === 'UP') return new THREE.Vector3(0, 1, 0);
+    if (d === 'DOWN') return new THREE.Vector3(0, -1, 0);
+    if (d === 'NORTH') return new THREE.Vector3(0, 0, -1);
+    if (d === 'SOUTH') return new THREE.Vector3(0, 0, 1);
+    if (d === 'EAST') return new THREE.Vector3(1, 0, 0);
+    if (d === 'WEST') return new THREE.Vector3(-1, 0, 0);
+    if (d === 'NORTHEAST') return new THREE.Vector3(1, 0, -1).normalize();
+    if (d === 'NORTHWEST') return new THREE.Vector3(-1, 0, -1).normalize();
+    if (d === 'SOUTHEAST') return new THREE.Vector3(1, 0, 1).normalize();
+    if (d === 'SOUTHWEST') return new THREE.Vector3(-1, 0, 1).normalize();
     return null;
 }
 
@@ -304,17 +362,27 @@ export class PcfViewer3D {
         this._componentMeshIndex = new Map();
         this._selectedComponentId = null;
         this._selectedOriginalMaterials = [];
-        this._navMode = 'orbit';
+        this._navMode = 'select';
+        this._navModeBeforeMarquee = 'select';
         this._lastMeasurement = null;
         this._measurePoints = [];
         this._measureVisuals = [];
         this._measureLine = null;
-        this._measureLabel = null;
         this._clipPlanes = [];
         this._sectionMode = 'OFF';
         this._sectionBounds = null;
         this._sectionVisual = null;
         this._heatmapState = null;
+        this._overlayRaf = 0;
+        this._overlayNeedsRebuild = false;
+        this._overlayLayerData = new Map();
+        this._overlayLayerVisibility = new Map();
+        this._overlayLayerFields = new Map();
+        this._overlayGroups = new Map();
+        this._overlayGeometryAnchors = [];
+        this._overlayModelSize = 1;
+        this._overlayScaleFactor = 1;
+        this._overlaySmartScaleMultiplier = Number(this.viewerConfig?.overlay?.smartScale?.multiplier || 1);
         this._projectionMode = String(this.viewerConfig?.camera?.projection || 'orthographic').toLowerCase();
         this._palette = this._resolvePalette();
         CURRENT_VERTICAL_AXIS = String(this.viewerConfig?.coordinateMap?.verticalAxis || 'Z').toUpperCase() === 'Y' ? 'Y' : 'Z';
@@ -343,8 +411,8 @@ export class PcfViewer3D {
         this._orthoCamera = new THREE.OrthographicCamera(
             -frustum * aspect, frustum * aspect,
             frustum, -frustum,
-            Number(this.viewerConfig?.camera?.near || -50000),
-            Number(this.viewerConfig?.camera?.far || 50000)
+            Math.max(0.1, Math.abs(Number(this.viewerConfig?.camera?.near || 0.1))),
+            Math.max(1000, Math.abs(Number(this.viewerConfig?.camera?.far || 1000000)))
         );
         const initialPosition = this.viewerConfig?.camera?.initialPosition || [5000, 5000, 5000];
         this._orthoCamera.position.set(Number(initialPosition[0] || 5000), Number(initialPosition[1] || 5000), Number(initialPosition[2] || 5000));
@@ -366,16 +434,22 @@ export class PcfViewer3D {
         this.renderer.setPixelRatio(window.devicePixelRatio);
         this.container.appendChild(this.renderer.domElement);
 
-        // CSS2D overlay renderer (for MESSAGE-CIRCLE / MESSAGE-SQUARE labels)
+        // CSS2D overlay renderer for all annotation layers.
         this._css2dRenderer = new CSS2DRenderer();
         this._css2dRenderer.setSize(w, h);
-        this._css2dRenderer.domElement.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;overflow:hidden;';
+        this._css2dRenderer.domElement.style.position = 'absolute';
+        this._css2dRenderer.domElement.style.top = '0';
+        this._css2dRenderer.domElement.style.left = '0';
+        this._css2dRenderer.domElement.style.right = '0';
+        this._css2dRenderer.domElement.style.bottom = '0';
+        this._css2dRenderer.domElement.style.width = '100%';
+        this._css2dRenderer.domElement.style.height = '100%';
+        this._css2dRenderer.domElement.style.pointerEvents = 'none';
+        this._css2dRenderer.domElement.style.overflow = 'hidden';
+        this._css2dRenderer.domElement.style.zIndex = '2';
         this.container.style.position = 'relative';
         this.container.appendChild(this._css2dRenderer.domElement);
-        this._msgCircleGroup = new THREE.Group();
-        this._msgSquareGroup = new THREE.Group();
-        this.scene.add(this._msgCircleGroup);
-        this.scene.add(this._msgSquareGroup);
+        this._initOverlayLayers();
         this._measureOverlayGroup = new THREE.Group();
         this.scene.add(this._measureOverlayGroup);
 
@@ -391,6 +465,7 @@ export class PcfViewer3D {
         this.controls.enableRotate = this.viewerConfig?.controls?.enableRotate !== false;
         if (this.viewerConfig?.controls?.invertX) this.controls.rotateSpeed *= -1;
         if (this.viewerConfig?.controls?.invertY) this.controls.rotateSpeed *= -1;
+        this.setNavMode('select');
         // C3: Refresh clipping planes on every orbit/pan so geometry never disappears
         this.controls.addEventListener('change', () => {
             this._emitTrace('orbit-change', { target: this.controls?.target?.toArray?.() || [] });
@@ -400,13 +475,15 @@ export class PcfViewer3D {
                     const sz = box.getSize(new THREE.Vector3());
                     const maxDim = Math.max(sz.x, sz.y, sz.z, 1);
                     if (this.camera instanceof THREE.OrthographicCamera) {
-                        this.camera.near = -maxDim * 20;
-                        this.camera.far = maxDim * 20;
+                        const distance = this.camera.position.distanceTo(this.controls?.target || new THREE.Vector3());
+                        this.camera.near = 0.1;
+                        this.camera.far = Math.max(1000, maxDim * 80, distance + maxDim * 20);
                     } else {
                         this.camera.near = 0.1;
-                        this.camera.far = maxDim * 50;
+                        this.camera.far = Math.max(1000, maxDim * 80);
                     }
                     this.camera.updateProjectionMatrix();
+                    this._queueOverlayRefresh();
                 }
             }
         });
@@ -433,13 +510,9 @@ export class PcfViewer3D {
             gridMinor
         );
         this._gridHelper.visible = this.viewerConfig?.helpers?.showGrid !== false;
-        if (CURRENT_VERTICAL_AXIS === 'Z') {
-            this._gridHelper.rotation.x = Math.PI / 2;
-            this._gridHelper.position.z = -500;
-        } else {
-            this._gridHelper.rotation.x = 0;
-            this._gridHelper.position.y = -500;
-        }
+        // Grid should always be on XZ plane, matching standard Three.js where Y is vertical.
+        this._gridHelper.rotation.x = 0;
+        this._gridHelper.position.y = -500;
         this.scene.add(this._gridHelper);
 
         const axes = new THREE.AxesHelper(1000);
@@ -460,6 +533,7 @@ export class PcfViewer3D {
             this._perspCamera.updateProjectionMatrix();
             this.renderer.setSize(nw, nh);
             if (this._css2dRenderer) this._css2dRenderer.setSize(nw, nh);
+            this._queueOverlayRefresh();
         };
         window.addEventListener('resize', this._onResize);
 
@@ -478,6 +552,7 @@ export class PcfViewer3D {
         if (this.controls) this.controls.update();
         this.renderer.render(this.scene, this.camera);
         if (this._css2dRenderer) this._css2dRenderer.render(this.scene, this.camera);
+        this._applyOverlaySmartScale();
         this._syncViewCube();
         this._syncAxisGizmo();
     }
@@ -509,12 +584,12 @@ export class PcfViewer3D {
         // The cube is rotated relative to the camera snap directions in this
         // viewer, so label the faces by the actual view they trigger.
         const FACES = [
-            { label: 'Left', rot: 'rotateX(-90deg)', bg: '#3b6ea5', cam: [0, 1, 0], up: [0, 0, -1] },
-            { label: 'Right', rot: 'rotateX(90deg)', bg: '#2b5285', cam: [0, -1, 0], up: [0, 0, 1] },
+            { label: 'Right', rot: 'rotateY(90deg) translateZ(' + half + 'px)', bg: '#2b5285', cam: [1, 0, 0], up: [0, 1, 0] },
+            { label: 'Left', rot: 'rotateY(-90deg) translateZ(' + half + 'px)', bg: '#3b6ea5', cam: [-1, 0, 0], up: [0, 1, 0] },
+            { label: 'Top', rot: 'rotateX(90deg) translateZ(' + half + 'px)', bg: '#3a6e85', cam: [0, 1, 0], up: [0, 0, -1] },
+            { label: 'Bottom', rot: 'rotateX(-90deg) translateZ(' + half + 'px)', bg: '#3a6e85', cam: [0, -1, 0], up: [0, 0, 1] },
             { label: 'Front', rot: 'translateZ(' + half + 'px)', bg: '#4a7c95', cam: [0, 0, 1], up: [0, 1, 0] },
             { label: 'Back', rot: 'rotateY(180deg) translateZ(' + half + 'px)', bg: '#4a7c95', cam: [0, 0, -1], up: [0, 1, 0] },
-            { label: 'Top', rot: 'rotateY(90deg) translateZ(' + half + 'px)', bg: '#3a6e85', cam: [1, 0, 0], up: [0, 1, 0] },
-            { label: 'Bottom', rot: 'rotateY(-90deg) translateZ(' + half + 'px)', bg: '#3a6e85', cam: [-1, 0, 0], up: [0, 1, 0] },
         ];
         for (const f of FACES) {
             const face = document.createElement('div');
@@ -598,6 +673,7 @@ export class PcfViewer3D {
         this.camera.lookAt(centre);
         this.controls.target.copy(centre);
         this.controls.update();
+        this._queueOverlayRefresh();
         this._emitTrace('fit-selection', { componentId: this._selectedComponentId });
     }
 
@@ -606,48 +682,306 @@ export class PcfViewer3D {
         if (this._onMeasurementChange) this._onMeasurementChange(this._lastMeasurement);
     }
 
-    setNavMode(mode = 'orbit') {
-        const normalized = String(mode || 'orbit');
+    setNavMode(mode = 'select') {
+        const normalized = String(mode || 'select');
         if (!this.controls) return;
+        const previousMode = String(this._navMode || 'select');
+
+        // Cancel any active marquee before switching
+        this._cancelMarquee();
+        // Critical: marquee pointerdown handler must be removed when leaving marquee mode,
+        // otherwise marquee can restart while using other tools.
+        if (normalized !== 'marquee') this._detachMarqueeHandlers();
+
         this._navMode = normalized;
         if (normalized === 'select') {
             this.controls.enableRotate = false;
             this.controls.enablePan = false;
             this.controls.enableZoom = true;
+            this.container.style.cursor = '';
         } else if (normalized === 'measure') {
             this.controls.enableRotate = false;
             this.controls.enablePan = false;
             this.controls.enableZoom = true;
+            this.container.style.cursor = 'crosshair';
         } else if (normalized === 'plan') {
             this.controls.enableRotate = true;
             this.controls.enablePan = true;
             this.controls.enableZoom = true;
-            this.snapToPreset('plan');
+            this.container.style.cursor = '';
+            if (previousMode === 'plan') {
+                const step = Number(this.viewerConfig?.controls?.planRotateStepDeg || 90);
+                this._rollPlanView(step);
+            } else {
+                this.snapToPreset('plan');
+            }
         } else if (normalized === 'rotateY') {
             this.controls.enableRotate = true;
             this.controls.enablePan = true;
             this.controls.enableZoom = true;
+            this.container.style.cursor = '';
             this._orbitAroundAxis('Y');
         } else if (normalized === 'rotateZ') {
             this.controls.enableRotate = true;
             this.controls.enablePan = true;
             this.controls.enableZoom = true;
+            this.container.style.cursor = '';
             this._orbitAroundAxis('Z');
         } else if (normalized === 'pan') {
             this.controls.enableRotate = false;
             this.controls.enablePan = true;
             this.controls.enableZoom = true;
+            this.container.style.cursor = '';
+        } else if (normalized === 'marquee') {
+            this._navModeBeforeMarquee = previousMode === 'marquee' ? 'select' : previousMode;
+            this.controls.enableRotate = false;
+            this.controls.enablePan = false;
+            this.controls.enableZoom = false;
+            this.container.style.cursor = 'crosshair';
+            this._attachMarqueeHandlers();
         } else {
             this.controls.enableRotate = true;
             this.controls.enablePan = true;
             this.controls.enableZoom = true;
+            this.container.style.cursor = '';
         }
         if (normalized !== 'measure') this._clearMeasureOverlay();
         this._emitTrace('nav-mode', { mode: normalized });
     }
 
+    /** Attach pointer event handlers for marquee zoom mode */
+    _attachMarqueeHandlers() {
+        this._detachMarqueeHandlers();
+        this._marqueeDown = (e) => {
+            if (e.button !== 0) return;
+            this._startMarqueeZoom(e);
+        };
+        this.container.addEventListener('pointerdown', this._marqueeDown);
+    }
+
+    _detachMarqueeHandlers() {
+        if (this._marqueeDown) {
+            this.container.removeEventListener('pointerdown', this._marqueeDown);
+            this._marqueeDown = null;
+        }
+    }
+
+    _startMarqueeZoom(e) {
+        const rect = this.container.getBoundingClientRect();
+        this._marqueeStart = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+
+        // Create rubber-band overlay div
+        if (!this._marqueeEl) {
+            const el = document.createElement('div');
+            el.style.cssText = [
+                'position:absolute',
+                'border:2px dashed #60a5fa',
+                'background:rgba(59,130,246,0.08)',
+                'pointer-events:none',
+                'z-index:999',
+                'box-shadow:0 0 0 1px rgba(59,130,246,0.25)',
+                'border-radius:2px',
+            ].join(';');
+            this.container.appendChild(el);
+            this._marqueeEl = el;
+        }
+        this._marqueeEl.style.display = 'block';
+        this._marqueeEl.style.left   = this._marqueeStart.x + 'px';
+        this._marqueeEl.style.top    = this._marqueeStart.y + 'px';
+        this._marqueeEl.style.width  = '0px';
+        this._marqueeEl.style.height = '0px';
+
+        this._marqueeMove = (e2) => this._updateMarqueeRect(e2);
+        this._marqueeUp   = (e2) => this._applyMarqueeZoom(e2);
+        window.addEventListener('pointermove', this._marqueeMove);
+        window.addEventListener('pointerup',   this._marqueeUp);
+    }
+
+    _updateMarqueeRect(e) {
+        if (!this._marqueeStart || !this._marqueeEl) return;
+        const rect = this.container.getBoundingClientRect();
+        const cx = e.clientX - rect.left;
+        const cy = e.clientY - rect.top;
+        const x = Math.min(cx, this._marqueeStart.x);
+        const y = Math.min(cy, this._marqueeStart.y);
+        const w = Math.abs(cx - this._marqueeStart.x);
+        const h = Math.abs(cy - this._marqueeStart.y);
+        this._marqueeEl.style.left   = x + 'px';
+        this._marqueeEl.style.top    = y + 'px';
+        this._marqueeEl.style.width  = w + 'px';
+        this._marqueeEl.style.height = h + 'px';
+    }
+
+    _applyMarqueeZoom(e) {
+        window.removeEventListener('pointermove', this._marqueeMove);
+        window.removeEventListener('pointerup',   this._marqueeUp);
+        this._marqueeMove = null;
+        this._marqueeUp   = null;
+
+        const start = this._marqueeStart;
+        const rect  = this.container.getBoundingClientRect();
+        const endX  = e.clientX - rect.left;
+        const endY  = e.clientY - rect.top;
+
+        this._cancelMarquee();
+
+        const W = rect.width;
+        const H = rect.height;
+        const x1 = Math.min(start.x, endX);
+        const x2 = Math.max(start.x, endX);
+        const y1 = Math.min(start.y, endY);
+        const y2 = Math.max(start.y, endY);
+
+        // Ignore tiny clicks
+        if ((x2 - x1) < 8 || (y2 - y1) < 8) return;
+
+        const cam = this.camera;
+        const compBox = this._componentGroup
+            ? new THREE.Box3().setFromObject(this._componentGroup)
+            : null;
+        if (!compBox || compBox.isEmpty()) return;
+        const toNdc = (sx, sy) => ({
+            x: (sx / W) * 2 - 1,
+            y: -((sy / H) * 2 - 1),
+        });
+        const raycaster = new THREE.Raycaster();
+        const mapScreenToPlanePoint = (sx, sy, plane) => {
+            const ndc = toNdc(sx, sy);
+            raycaster.setFromCamera(new THREE.Vector2(ndc.x, ndc.y), cam);
+            const hit = new THREE.Vector3();
+            const ok = raycaster.ray.intersectPlane(plane, hit);
+            return ok ? hit : null;
+        };
+
+        const selectedScreenCentre = {
+            x: (x1 + x2) * 0.5,
+            y: (y1 + y2) * 0.5,
+        };
+        const canvasScreenCentre = { x: W * 0.5, y: H * 0.5 };
+
+        const currentTarget = this.controls?.target?.clone() || compBox.getCenter(new THREE.Vector3());
+        const viewNormal = cam.getWorldDirection(new THREE.Vector3()).normalize();
+        const focusPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(viewNormal, currentTarget);
+
+        const selectedWorldCentre = mapScreenToPlanePoint(selectedScreenCentre.x, selectedScreenCentre.y, focusPlane);
+        const canvasWorldCentre = mapScreenToPlanePoint(canvasScreenCentre.x, canvasScreenCentre.y, focusPlane);
+
+        const newTarget = currentTarget.clone();
+        const newPos = cam.position.clone();
+        if (selectedWorldCentre && canvasWorldCentre) {
+            const delta = selectedWorldCentre.clone().sub(canvasWorldCentre);
+            newTarget.add(delta);
+            newPos.add(delta);
+        }
+
+        const rectWidth = Math.max(1, x2 - x1);
+        const rectHeight = Math.max(1, y2 - y1);
+        const fitScale = Math.max(1.0, Math.min(W / rectWidth, H / rectHeight) * 0.92);
+        let nextZoom = null;
+        if (cam instanceof THREE.OrthographicCamera) {
+            nextZoom = THREE.MathUtils.clamp(Number(cam.zoom || 1) * fitScale, 0.05, 5000);
+        } else {
+            const currentDistance = Math.max(1, cam.position.distanceTo(this.controls.target));
+            const nextDistance = Math.max(1, currentDistance / fitScale);
+            const viewDir = cam.position.clone().sub(this.controls.target).normalize();
+            newPos.copy(newTarget).addScaledVector(viewDir, nextDistance);
+        }
+
+        // Animate
+        const startPos    = cam.position.clone();
+        const startTarget = this.controls.target.clone();
+        const startZoom   = cam instanceof THREE.OrthographicCamera ? Number(cam.zoom || 1) : null;
+        const duration    = 300;
+        const start0      = performance.now();
+        const tick = (now) => {
+            const t = Math.min((now - start0) / duration, 1);
+            const ease = t < 0.5 ? 2*t*t : -1+(4-2*t)*t; // ease in-out quad
+            cam.position.lerpVectors(startPos, newPos, ease);
+            this.controls.target.lerpVectors(startTarget, newTarget, ease);
+            if (cam instanceof THREE.OrthographicCamera && nextZoom != null && startZoom != null) {
+                cam.zoom = THREE.MathUtils.lerp(startZoom, nextZoom, ease);
+                cam.updateProjectionMatrix();
+            }
+            this.controls.update();
+            if (t < 1) {
+                requestAnimationFrame(tick);
+            } else {
+                // Restore the mode used before marquee zoom was started.
+                const resumeMode = String(this._navModeBeforeMarquee || 'select');
+                this.setNavMode(resumeMode);
+                this._emitTrace('marquee-zoom-done', { resumeMode });
+            }
+        };
+        requestAnimationFrame(tick);
+        this._emitTrace('marquee-zoom', { x1, y1, x2, y2 });
+    }
+
+    _cancelMarquee() {
+        if (this._marqueeEl) {
+            this._marqueeEl.style.display = 'none';
+        }
+        this._marqueeStart = null;
+        if (this._marqueeMove) { window.removeEventListener('pointermove', this._marqueeMove); this._marqueeMove = null; }
+        if (this._marqueeUp)   { window.removeEventListener('pointerup',   this._marqueeUp);   this._marqueeUp   = null; }
+    }
+
     getNavMode() {
         return this._navMode;
+    }
+
+    getProjectionMode() {
+        return this._projectionMode;
+    }
+
+    getSectionMode() {
+        return this._sectionMode;
+    }
+
+    /**
+     * Nudge the PLANE_UP section plane by `delta` mm along the vertical axis.
+     * No-op if section mode is not PLANE_UP.
+     */
+    nudgeSectionPlane(delta) {
+        if (this._sectionMode !== 'PLANE_UP') return;
+        if (!this._clipPlanes || this._clipPlanes.length === 0) return;
+        // Plane equation: normal·x + constant = 0
+        // For Z-up: normal=(0,0,-1), constant=cut  → plane is at z=cut
+        // Increasing cut moves the plane up (shows less of the model)
+        this._clipPlanes[0].constant += delta;
+        this._applyCurrentSectionClipping();
+        this._renderSectionPlaneVisual?.(
+            this._clipPlanes[0].normal.clone(),
+            this._clipPlanes[0].constant,
+            this._sectionBounds,
+        );
+        this._queueOverlayRefresh();
+    }
+
+    /**
+     * Set PLANE_UP section plane to an absolute offset from the model centre.
+     * Called by the UI slider in the section panel.
+     */
+    setSectionPlaneOffset(offset) {
+        if (this._sectionMode !== 'PLANE_UP') return;
+        if (!this._clipPlanes || this._clipPlanes.length === 0) return;
+        if (!this._sectionBounds) return;
+        const centre = this._sectionBounds.getCenter(new THREE.Vector3());
+        const base = centre.y;
+        this._clipPlanes[0].constant = base + Number(offset || 0);
+        this._applyCurrentSectionClipping();
+    }
+
+    /**
+     * Shrink or expand the BOX section planes by `padding` mm inward.
+     * Called by the UI slider in the section panel.
+     */
+    setSectionBoxPadding(padding) {
+        if (this._sectionMode !== 'BOX') return;
+        if (!this._sectionBounds) return;
+        const pad = Number(padding || 0);
+        const box = this._sectionBounds.clone();
+        box.expandByScalar(-pad);
+        this._applyBoxPlanes(box);
     }
 
     toggleProjection() {
@@ -663,6 +997,7 @@ export class PcfViewer3D {
             this.camera = next;
             this.camera.updateProjectionMatrix();
         }
+        this._queueOverlayRefresh();
         this._emitTrace('projection-toggle', { mode: this._projectionMode });
     }
 
@@ -681,19 +1016,53 @@ export class PcfViewer3D {
 
     _orbitAroundAxis(axis) {
         if (!this.controls || !this.camera) return;
-        const box = new THREE.Box3();
-        if (this._componentGroup) box.setFromObject(this._componentGroup);
-        const centre = box.isEmpty() ? this.controls.target.clone() : box.getCenter(new THREE.Vector3());
-        const offset = this.camera.position.clone().sub(this.controls.target);
-        const radius = Math.max(offset.length(), 1);
-        const nextOffset = axis === 'Y'
-            ? new THREE.Vector3(radius, radius * 0.35, 0)
-            : new THREE.Vector3(radius * 0.35, 0, radius);
-        this.camera.position.copy(centre.clone().add(nextOffset));
-        this.controls.target.copy(centre);
-        this.camera.lookAt(centre);
+        const target = this.controls.target.clone();
+        const offset = this.camera.position.clone().sub(target);
+        if (offset.lengthSq() < 1e-8) return;
+        const axisKey = String(axis || 'Y').toUpperCase();
+        const axisVector = axisKey === 'Z'
+            ? new THREE.Vector3(0, 0, 1)
+            : axisKey === 'X'
+                ? new THREE.Vector3(1, 0, 0)
+                : new THREE.Vector3(0, 1, 0);
+        const stepDeg = Number(this.viewerConfig?.controls?.rotateStepDeg || 30);
+        const rotation = new THREE.Quaternion().setFromAxisAngle(axisVector, THREE.MathUtils.degToRad(stepDeg));
+        const nextOffset = offset.clone().applyQuaternion(rotation);
+        const nextUp = this.camera.up.clone().applyQuaternion(rotation).normalize();
+
+        this.camera.position.copy(target.clone().add(nextOffset));
+        this.camera.up.copy(nextUp);
+        this.controls.target.copy(target);
+        this.camera.lookAt(target);
         this.controls.update();
-        this._emitTrace('camera-orbit-axis', { axis });
+        this._queueOverlayRefresh();
+        this._emitTrace('camera-orbit-axis', {
+            axis: axisKey,
+            stepDeg,
+            cameraPosition: this.camera.position.toArray(),
+            target: this.controls.target.toArray(),
+            up: this.camera.up.toArray(),
+        });
+    }
+
+    _rollPlanView(stepDeg = 90) {
+        if (!this.controls || !this.camera) return;
+        const target = this.controls.target.clone();
+        const viewDir = target.clone().sub(this.camera.position);
+        if (viewDir.lengthSq() < 1e-8) return;
+        viewDir.normalize();
+        const rotation = new THREE.Quaternion().setFromAxisAngle(viewDir, THREE.MathUtils.degToRad(Number(stepDeg || 90)));
+        this.camera.up.applyQuaternion(rotation).normalize();
+        this.camera.lookAt(target);
+        this.controls.target.copy(target);
+        this.controls.update();
+        this._queueOverlayRefresh();
+        this._emitTrace('camera-plan-roll', {
+            stepDeg: Number(stepDeg || 90),
+            cameraPosition: this.camera.position.toArray(),
+            target: this.controls.target.toArray(),
+            up: this.camera.up.toArray(),
+        });
     }
 
     /** @private — Snap camera to axis-aligned view */
@@ -713,19 +1082,24 @@ export class PcfViewer3D {
         this.camera.updateProjectionMatrix();
         this.controls.target.copy(centre);
         this.controls.update();
+        this._queueOverlayRefresh();
         this._emitTrace('camera-snap', { cx, cy, cz, ux, uy, uz });
     }
 
     /** @private — Sync ViewCube rotation with camera */
     _syncViewCube() {
         if (!this._viewCubeInner || !this.camera) return;
-        const q = this.camera.quaternion.clone();
-        if ((this.viewerConfig?.coordinateMap?.axisConvention || 'Z-up') === 'Z-up') {
-            const rootQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
-            q.premultiply(rootQ.clone().invert());
-        }
-        const mat = new THREE.Matrix4().makeRotationFromQuaternion(q.clone().invert());
-        this._viewCubeInner.style.transform = `matrix3d(${mat.elements.join(',')})`;
+        const q = this.camera.quaternion.clone().invert();
+        const mat = new THREE.Matrix4().makeRotationFromQuaternion(q);
+        const els = mat.elements;
+        // Transform the Y axis to match CSS coordinate system (Y is down)
+        const cssMat = [
+            els[0], -els[1], els[2], els[3],
+            -els[4], els[5], -els[6], els[7],
+            els[8], -els[9], els[10], els[11],
+            els[12], els[13], els[14], els[15]
+        ];
+        this._viewCubeInner.style.transform = `translateZ(-220px) matrix3d(${cssMat.join(',')})`;
     }
 
     /** @private — Build axis gizmo in bottom-right */
@@ -767,7 +1141,7 @@ export class PcfViewer3D {
         for (const { src, color, label } of axes) {
             const dir = mapCoord(src);
             if (!dir) continue;
-            const proj = dir.clone().applyQuaternion(this.camera.quaternion);
+            const proj = dir.clone().applyQuaternion(this.camera.quaternion.clone().invert());
             const ex = cx + proj.x * len;
             const ey = cy - proj.y * len;
             ctx.strokeStyle = color;
@@ -786,6 +1160,300 @@ export class PcfViewer3D {
     /** @private */
     _wireFullscreen() {
         // Fullscreen is now handled by viewer-tab.js — kept for backward compatibility
+    }
+
+    /**
+     * Initialize the unified CSS2D overlay layer stack used by MESSAGE, Length, Measure, and Spare labels.
+     * Layer data is fed through `setOverlayLayerData` and rebuilt via `rebuildOverlayLayers`.
+     */
+    _initOverlayLayers() {
+        const layerIds = Object.values(OVERLAY_LAYER_IDS);
+        for (const layerId of layerIds) {
+            const group = new THREE.Group();
+            group.name = `overlay-layer-${layerId}`;
+            this._overlayGroups.set(layerId, group);
+            this._overlayLayerData.set(layerId, []);
+            this._overlayLayerVisibility.set(layerId, this._defaultOverlayLayerVisibility(layerId));
+            this.scene.add(group);
+        }
+        this._overlayLayerFields.set(OVERLAY_LAYER_IDS.SPARE_1, String(this.viewerConfig?.spareOverlays?.spare1?.selectedField || ''));
+        this._overlayLayerFields.set(OVERLAY_LAYER_IDS.SPARE_2, String(this.viewerConfig?.spareOverlays?.spare2?.selectedField || ''));
+    }
+
+    _defaultOverlayLayerVisibility(layerId) {
+        if (layerId === OVERLAY_LAYER_IDS.MESSAGE_CIRCLE) return !!this.viewerConfig?.nodes?.enabled;
+        if (layerId === OVERLAY_LAYER_IDS.MESSAGE_SQUARE) return this.viewerConfig?.overlay?.annotations?.messageSquareEnabled !== false;
+        if (layerId === OVERLAY_LAYER_IDS.LENGTH) return !!this.viewerConfig?.lengthLabels?.enabled;
+        if (layerId === OVERLAY_LAYER_IDS.SPARE_1) return !!this.viewerConfig?.spareOverlays?.spare1?.enabled;
+        if (layerId === OVERLAY_LAYER_IDS.SPARE_2) return !!this.viewerConfig?.spareOverlays?.spare2?.enabled;
+        return true;
+    }
+
+    /**
+     * Set or replace one overlay layer's source rows.
+     * @param {string} layerId
+     * @param {Array<object>} rows
+     */
+    setOverlayLayerData(layerId, rows) {
+        if (!this._overlayLayerData.has(layerId)) return;
+        this._overlayLayerData.set(layerId, Array.isArray(rows) ? rows.slice() : []);
+        this._queueOverlayRefresh(true);
+    }
+
+    /**
+     * Toggle one overlay layer's visibility without mutating other layers.
+     * @param {string} layerId
+     * @param {boolean} enabled
+     */
+    setOverlayLayerVisibility(layerId, enabled) {
+        if (!this._overlayLayerVisibility.has(layerId)) return;
+        this._overlayLayerVisibility.set(layerId, !!enabled);
+        const group = this._overlayGroups.get(layerId);
+        if (group) group.visible = !!enabled;
+        this._queueOverlayRefresh(true);
+    }
+
+    /**
+     * Set the field key used for a data-driven layer (Spare 1 / Spare 2).
+     * @param {string} layerId
+     * @param {string} fieldKey
+     */
+    setOverlayLayerField(layerId, fieldKey) {
+        if (!this._overlayLayerData.has(layerId)) return;
+        this._overlayLayerFields.set(layerId, String(fieldKey || ''));
+        this._queueOverlayRefresh(true);
+    }
+
+    /**
+     * Rebuild all overlay layer nodes from current layer data + visibility state.
+     * This call is safe to run repeatedly and used after model/config/camera changes.
+     */
+    rebuildOverlayLayers() {
+        this._overlayNeedsRebuild = false;
+        const layerIds = Object.values(OVERLAY_LAYER_IDS);
+        for (const layerId of layerIds) {
+            const group = this._overlayGroups.get(layerId);
+            if (!group) continue;
+            while (group.children.length) group.remove(group.children[0]);
+
+            const visible = this._overlayLayerVisibility.get(layerId) !== false;
+            group.visible = visible;
+            if (!visible) continue;
+
+            const rows = this._overlayLayerData.get(layerId) || [];
+            const labelRows = layerId === OVERLAY_LAYER_IDS.SPARE_1 || layerId === OVERLAY_LAYER_IDS.SPARE_2
+                ? this._resolveSpareLayerRows(layerId, rows)
+                : rows;
+
+            for (const row of labelRows) {
+                const text = String(row?.text || '').trim();
+                if (!text) continue;
+                const worldPos = this._overlayRowToWorld(layerId, row);
+                if (!worldPos) continue;
+                const label = this._buildOverlayLabel(layerId, text, row?.styleKey);
+                const lift = Number(row?.lift || 0);
+                label.position.copy(worldPos);
+                label.position.addScaledVector(_verticalVector().clone().normalize(), lift);
+                group.add(label);
+            }
+        }
+        this._applyOverlaySmartScale();
+    }
+
+    _overlayRowToWorld(layerId, row) {
+        if (!row) return null;
+        if (row.worldPos?.isVector3) return row.worldPos.clone();
+        if (row.worldPos && Number.isFinite(Number(row.worldPos.x)) && Number.isFinite(Number(row.worldPos.y)) && Number.isFinite(Number(row.worldPos.z))) {
+            return new THREE.Vector3(Number(row.worldPos.x), Number(row.worldPos.y), Number(row.worldPos.z));
+        }
+        if (layerId === OVERLAY_LAYER_IDS.SPARE_1 || layerId === OVERLAY_LAYER_IDS.SPARE_2) {
+            const mapped = mapCoord(row);
+            if (!mapped) return null;
+            if (this.viewerConfig?.spareOverlays?.snapToNearest !== false) {
+                const tolerance = Number(this.viewerConfig?.spareOverlays?.snapToleranceMm || 180);
+                const nearest = this._findNearestOverlayAnchor(mapped);
+                if (nearest && nearest.distance <= tolerance) return nearest.point.clone();
+            }
+            return mapped;
+        }
+        const sourcePos = row.pos || row.position || row.point || row;
+        const mapped = mapCoord(sourcePos);
+        return mapped || null;
+    }
+
+    _resolveSpareLayerRows(layerId, rows) {
+        const fieldKey = String(this._overlayLayerFields.get(layerId) || '');
+        const resolved = [];
+        for (const row of rows || []) {
+            const fields = row?.fields && typeof row.fields === 'object' ? row.fields : {};
+            const fallbackField = Object.keys(fields)[0] || '';
+            const key = fieldKey || fallbackField;
+            if (!key) continue;
+            const value = fields[key];
+            if (value == null || String(value).trim() === '') continue;
+            resolved.push({
+                ...row,
+                text: String(value),
+                lift: Number(row?.lift ?? 26),
+            });
+        }
+        return resolved;
+    }
+
+    _buildOverlayLabel(layerId, text, styleKey = '') {
+        const div = document.createElement('div');
+        const style = this._overlayStyleForLayer(layerId, styleKey);
+        div.textContent = text;
+        div.style.pointerEvents = 'none';
+        div.style.whiteSpace = 'nowrap';
+        div.style.maxWidth = `${style.maxWidth}px`;
+        div.style.overflow = 'hidden';
+        div.style.textOverflow = 'ellipsis';
+        div.style.boxShadow = style.shadow;
+        div.style.color = style.color;
+        div.style.background = style.background;
+        div.style.border = `${style.borderWidth}px solid ${style.borderColor}`;
+        div.style.borderRadius = `${style.borderRadius}px`;
+        div.style.letterSpacing = `${style.letterSpacing}em`;
+        const obj = new CSS2DObject(div);
+        obj.userData.overlayScaleBase = style;
+        this._applyScaleToOverlayObject(obj, this._overlayScaleFactor || 1);
+        return obj;
+    }
+
+    _overlayStyleForLayer(layerId, styleKey = '') {
+        if (layerId === OVERLAY_LAYER_IDS.MESSAGE_CIRCLE) {
+            return { fontSize: 10, fontWeight: 700, padX: 5, padY: 2, borderWidth: 2, borderRadius: 999, maxWidth: 180, letterSpacing: 0.02, color: '#ffffff', background: '#1a56db', borderColor: '#93c5fd', shadow: '0 1px 4px rgba(0,0,0,0.4)' };
+        }
+        if (layerId === OVERLAY_LAYER_IDS.MESSAGE_SQUARE) {
+            return { fontSize: 9, fontWeight: 600, padX: 5, padY: 2, borderWidth: 1, borderRadius: 3, maxWidth: 220, letterSpacing: 0.01, color: '#1a1a00', background: 'rgba(255,235,59,0.92)', borderColor: 'rgba(161,120,0,0.6)', shadow: '0 1px 3px rgba(0,0,0,0.3)' };
+        }
+        if (layerId === OVERLAY_LAYER_IDS.LENGTH) {
+            return { fontSize: 11, fontWeight: 600, padX: 6, padY: 2, borderWidth: 1, borderRadius: 6, maxWidth: 170, letterSpacing: 0.01, color: '#f8fbff', background: 'rgba(10, 23, 41, 0.9)', borderColor: 'rgba(156, 197, 255, 0.55)', shadow: '0 2px 6px rgba(0,0,0,0.25)' };
+        }
+        if (layerId === OVERLAY_LAYER_IDS.MEASURE) {
+            return { fontSize: 12, fontWeight: 700, padX: 10, padY: 6, borderWidth: 1, borderRadius: 999, maxWidth: 420, letterSpacing: 0.01, color: '#eef6ff', background: 'rgba(10, 21, 38, 0.92)', borderColor: 'rgba(125, 211, 252, 0.36)', shadow: '0 8px 24px rgba(0, 0, 0, 0.28)' };
+        }
+        if (layerId === OVERLAY_LAYER_IDS.SPARE_2 || styleKey === 'spare2') {
+            return { fontSize: 10, fontWeight: 700, padX: 6, padY: 3, borderWidth: 1, borderRadius: 5, maxWidth: 240, letterSpacing: 0.01, color: '#ffeef8', background: 'rgba(128, 22, 70, 0.88)', borderColor: 'rgba(255, 145, 203, 0.65)', shadow: '0 3px 8px rgba(0,0,0,0.28)' };
+        }
+        return { fontSize: 10, fontWeight: 700, padX: 6, padY: 3, borderWidth: 1, borderRadius: 5, maxWidth: 240, letterSpacing: 0.01, color: '#ecfffa', background: 'rgba(14, 94, 79, 0.88)', borderColor: 'rgba(94, 234, 212, 0.68)', shadow: '0 3px 8px rgba(0,0,0,0.28)' };
+    }
+
+    _updateOverlayGeometryAnchors(components = []) {
+        const anchors = [];
+        const dedupe = new Set();
+        const pushPoint = (p) => {
+            if (!p) return;
+            const wp = mapCoord(p);
+            if (!wp) return;
+            const key = `${Math.round(wp.x)}|${Math.round(wp.y)}|${Math.round(wp.z)}`;
+            if (dedupe.has(key)) return;
+            dedupe.add(key);
+            anchors.push(wp);
+        };
+        for (const comp of components || []) {
+            if (Array.isArray(comp?.points)) {
+                for (const pt of comp.points) pushPoint(pt);
+            }
+            pushPoint(comp?.centrePoint);
+            pushPoint(comp?.branch1Point);
+            pushPoint(comp?.coOrds);
+        }
+        this._overlayGeometryAnchors = anchors;
+        if (this._componentGroup) {
+            const box = new THREE.Box3().setFromObject(this._componentGroup);
+            if (!box.isEmpty()) {
+                this._overlayModelSize = Math.max(1, box.getSize(new THREE.Vector3()).length());
+            }
+        }
+    }
+
+    _findNearestOverlayAnchor(worldPoint) {
+        if (!worldPoint || !this._overlayGeometryAnchors.length) return null;
+        let best = null;
+        let bestDist = Infinity;
+        for (const anchor of this._overlayGeometryAnchors) {
+            const d = anchor.distanceTo(worldPoint);
+            if (d < bestDist) {
+                bestDist = d;
+                best = anchor;
+            }
+        }
+        return best ? { point: best, distance: bestDist } : null;
+    }
+
+    _queueOverlayRefresh(rebuild = false) {
+        if (rebuild) this._overlayNeedsRebuild = true;
+        if (this._overlayRaf) return;
+        this._overlayRaf = requestAnimationFrame(() => {
+            this._overlayRaf = 0;
+            if (this._overlayNeedsRebuild) {
+                this._overlayNeedsRebuild = false;
+                this.rebuildOverlayLayers();
+                return;
+            }
+            this._applyOverlaySmartScale();
+        });
+    }
+
+    _computeOverlayScaleFactor() {
+        const smart = this.viewerConfig?.overlay?.smartScale || {};
+        const enabled = smart.enabled !== false;
+        const multiplier = Number.isFinite(Number(this._overlaySmartScaleMultiplier))
+            ? Number(this._overlaySmartScaleMultiplier)
+            : Number(smart.multiplier || 1);
+        const sensitivity = THREE.MathUtils.clamp(Number(smart.scrollSensitivity ?? 0.2), 0.05, 2.5);
+        const min = Number.isFinite(Number(smart.min)) ? Number(smart.min) : 0.65;
+        const max = Number.isFinite(Number(smart.max)) ? Number(smart.max) : 1.9;
+        if (!enabled || !this.camera) return THREE.MathUtils.clamp(multiplier, min, max);
+
+        const modelSize = Math.max(1, Number(this._overlayModelSize || 1));
+        const target = this.controls?.target || new THREE.Vector3();
+        const distance = Math.max(1, this.camera.position.distanceTo(target));
+        const cameraFactor = this.camera instanceof THREE.OrthographicCamera
+            ? Math.pow(Math.max(0.05, Number(this.camera.zoom || 1)), 0.28 * sensitivity)
+            : Math.pow(THREE.MathUtils.clamp(modelSize / distance, 0.2, 3), 0.34 * sensitivity);
+        const modelFactor = Math.pow(THREE.MathUtils.clamp(modelSize / 2500, 0.5, 2.2), 0.16);
+        const raw = multiplier * cameraFactor * modelFactor;
+        return THREE.MathUtils.clamp(raw, min, max);
+    }
+
+    _applyScaleToOverlayObject(obj, scale) {
+        if (!obj?.element || !obj.userData?.overlayScaleBase) return;
+        const base = obj.userData.overlayScaleBase;
+        const scaledFont = Math.max(8, base.fontSize * scale);
+        const scaledPadY = Math.max(1, base.padY * scale);
+        const scaledPadX = Math.max(2, base.padX * scale);
+        const scaledBorder = Math.max(1, base.borderWidth * Math.min(1.6, scale));
+        const scaledRadius = Math.max(2, base.borderRadius * Math.min(1.5, scale));
+        obj.element.style.font = `${base.fontWeight} ${scaledFont.toFixed(2)}px/1.1 "Segoe UI", Arial, sans-serif`;
+        obj.element.style.padding = `${scaledPadY.toFixed(2)}px ${scaledPadX.toFixed(2)}px`;
+        obj.element.style.borderWidth = `${scaledBorder.toFixed(2)}px`;
+        obj.element.style.borderRadius = `${scaledRadius.toFixed(2)}px`;
+    }
+
+    _applyOverlaySmartScale() {
+        const nextScale = this._computeOverlayScaleFactor();
+        if (Math.abs(nextScale - this._overlayScaleFactor) < 0.005) return;
+        this._overlayScaleFactor = nextScale;
+        for (const group of this._overlayGroups.values()) {
+            for (const child of group.children) {
+                this._applyScaleToOverlayObject(child, nextScale);
+            }
+        }
+    }
+
+    /**
+     * Runtime smart-scale multiplier update used by UI slider without forcing full viewer rerender.
+     * @param {number} multiplier
+     */
+    setOverlaySmartScaleMultiplier(multiplier) {
+        const next = Number(multiplier);
+        if (!Number.isFinite(next)) return;
+        this._overlaySmartScaleMultiplier = THREE.MathUtils.clamp(next, 0.2, 4);
+        this._overlayScaleFactor = Number.NaN;
+        this._applyOverlaySmartScale();
     }
 
     /**
@@ -838,11 +1506,20 @@ export class PcfViewer3D {
         this.scene.add(this._componentGroup);
         this._applyCurrentSectionClipping();
         if (this._onSelectionChange) this._onSelectionChange(null);
-        this._rebuildLegendLabels(components);
-        this._renderHeatmapPanel();
-
-        // Auto-fit camera if components exist
+        // Auto-fit camera before placing overlay labels so screen-space projection is accurate.
         if (components.length > 0) this._fitCamera();
+        this._updateOverlayGeometryAnchors(components);
+        this._rebuildLegendLabels(components);
+        this._rebuildLengthLabels(components);
+        this.setOverlayLayerVisibility(OVERLAY_LAYER_IDS.MESSAGE_CIRCLE, !!this.viewerConfig?.nodes?.enabled);
+        this.setOverlayLayerVisibility(OVERLAY_LAYER_IDS.MESSAGE_SQUARE, this.viewerConfig?.overlay?.annotations?.messageSquareEnabled !== false);
+        this.setOverlayLayerVisibility(OVERLAY_LAYER_IDS.LENGTH, !!this.viewerConfig?.lengthLabels?.enabled);
+        this.setOverlayLayerVisibility(OVERLAY_LAYER_IDS.SPARE_1, !!this.viewerConfig?.spareOverlays?.spare1?.enabled);
+        this.setOverlayLayerVisibility(OVERLAY_LAYER_IDS.SPARE_2, !!this.viewerConfig?.spareOverlays?.spare2?.enabled);
+        this.setOverlayLayerField(OVERLAY_LAYER_IDS.SPARE_1, this.viewerConfig?.spareOverlays?.spare1?.selectedField || '');
+        this.setOverlayLayerField(OVERLAY_LAYER_IDS.SPARE_2, this.viewerConfig?.spareOverlays?.spare2?.selectedField || '');
+        this._renderHeatmapPanel();
+        this.rebuildOverlayLayers();
         this._emitTrace('render-complete', { rendered: this._componentMeshIndex.size });
     }
 
@@ -946,23 +1623,31 @@ export class PcfViewer3D {
         normal.normalize();
 
         const arcRadius = Math.min(v1.length(), v2.length());
-        const arcStart = c.clone().addScaledVector(d1, arcRadius);
-        const arcEnd = c.clone().addScaledVector(d2, arcRadius);
-
-        const steps = Math.max(12, Math.ceil(angle / (Math.PI / 36)));
-        const quat = new THREE.Quaternion();
-        const arcPts = [];
-        for (let i = 0; i <= steps; i += 1) {
-            const t = i / steps;
-            quat.setFromAxisAngle(normal, angle * t);
-            const dir = d1.clone().applyQuaternion(quat);
-            arcPts.push(c.clone().addScaledVector(dir, arcRadius));
+        if (arcRadius < radius * 0.5) {
+            // Arc radius too small to form a visible curve — render as straight line
+            const cyl = createCylinder(p1, p2, radius, color);
+            return cyl ? [cyl] : [];
         }
 
+        // Tangent points on the arc: where the straight pipe legs meet the curved section
+        const arcStart = c.clone().addScaledVector(d1, arcRadius);
+        const arcEnd   = c.clone().addScaledVector(d2, arcRadius);
+
+        // Cubic Bezier arc approximation for a circular arc of sweep angle θ:
+        //   alpha = (4/3) * tan(θ/4)
+        // This is the established formula for circle-quadrant Bezier approximation.
+        // sweepAngle is the interior bend angle seen at the elbow centreline.
+        const sweepAngle = Math.PI - angle;   // supplement of the angle between leg directions
+        const alpha = (4 / 3) * Math.tan(sweepAngle / 4);
+
+        // Control points: start at tangent point, move inward along the leg direction toward c
+        const cp1 = arcStart.clone().addScaledVector(d1, -alpha * arcRadius);
+        const cp2 = arcEnd.clone().addScaledVector(d2, -alpha * arcRadius);
+        const bendCurve = new THREE.CubicBezierCurve3(arcStart, cp1, cp2, arcEnd);
+
         const straight1 = p1.distanceTo(arcStart) > 0.1 ? createCylinder(p1, arcStart, radius, color) : null;
-        const straight2 = arcEnd.distanceTo(p2) > 0.1 ? createCylinder(arcEnd, p2, radius, color) : null;
-        const bendCurve = new THREE.CatmullRomCurve3(arcPts, false, 'centripetal');
-        const bend = createTubeFromCurve(bendCurve, radius, color, Math.max(24, steps * 2), 16);
+        const straight2 = arcEnd.distanceTo(p2)   > 0.1 ? createCylinder(arcEnd, p2,   radius, color) : null;
+        const bend      = createTubeFromCurve(bendCurve, radius, color, 32, 16);
 
         return [straight1, bend, straight2].filter(Boolean);
     }
@@ -1041,31 +1726,26 @@ export class PcfViewer3D {
 
     /** @private — Support graphic based on subtype */
     _buildSupport(pos, radius, comp) {
-        const r = radius;
+        const supportScale = Number(this.viewerConfig?.supportGeometry?.symbolScale || 2);
+        const r = radius * (Number.isFinite(supportScale) ? supportScale : 2);
         const color = this._palette.SUPPORT;
         const anchorColor = this._palette.ANCI;
         const supportMat = _supportMaterial(color);
         const anchorMat = _supportMaterial(anchorColor);
         const up = new THREE.Vector3(0, 1, 0);
-        const nameRaw = String(
-            comp.attributes?.SUPPORT_TAG ||
-            comp.attributes?.SKEY ||
-            comp.attributes?.SUPPORT_NAME ||
-            comp.attributes?.['<SUPPORT_NAME>'] ||
-            comp.attributes?.['COMPONENT-ATTRIBUTE1'] ||
-            comp.attributes?.['COMPONENT-ATTRIBUTE2'] ||
-            ''
-        ).toUpperCase();
+        const attrs = comp.attributes || {};
+        const supportText = _supportTextFromAttributes(attrs);
+        const supportDirection = _supportDirectionFromText(supportText);
 
-        const declaredKind = _supportKindFromToken(comp.attributes?.SUPPORT_KIND || '');
-        let supportKind = declaredKind || _supportKindFromText(nameRaw);
-        const explicitRest = /\bRST\b|\bREST\b|\+Y\s*(SUPPORT|RESTRAINT)\b|\bY\s*(SUPPORT|RESTRAINT)\b|\+Y\b/.test(nameRaw);
-        const supportDofs = _dofsFromText(comp.attributes?.SUPPORT_DOFS || '');
+        const declaredKind = _supportKindFromToken(attrs.SUPPORT_KIND || attrs['SUPPORT-KIND'] || '');
+        let supportKind = declaredKind || _supportKindFromText(supportText);
+        const explicitRest = /\bRST\b|\bREST\b|\+Y\s*(SUPPORT|RESTRAINT)\b|\bY\s*(SUPPORT|RESTRAINT)\b|\+Y\b/.test(supportText);
+        const supportDofs = _dofsFromText(attrs.SUPPORT_DOFS || attrs['SUPPORT-DOFS'] || '');
         const dofSet = new Set(supportDofs);
         const dofRest = dofSet.size === 1 && dofSet.has(2);
         const dofAnchor = dofSet.size >= 6;
         const dofGuide = dofSet.size > 0 && [...dofSet].every(v => v === 1 || v === 3);
-        const axisSemanticKind = _semanticSupportKindFromAxisCosinesText(comp.attributes?.AXIS_COSINES || '');
+        const axisSemanticKind = _semanticSupportKindFromAxisCosinesText(attrs.AXIS_COSINES || attrs['AXIS-COSINES'] || '');
         if (dofAnchor) supportKind = 'ANCHOR';
         else if (dofRest) supportKind = 'REST';
         else if (dofGuide && supportKind === 'UNKNOWN') supportKind = 'GUIDE';
@@ -1073,10 +1753,18 @@ export class PcfViewer3D {
         else if (axisSemanticKind === 'GUIDE' && supportKind === 'UNKNOWN') supportKind = 'GUIDE';
         if (explicitRest && supportKind !== 'ANCHOR') supportKind = 'REST';
         const isFixed = supportKind === 'ANCHOR';
-        const supportAxis = _axisFromCosinesText(comp.attributes?.AXIS_COSINES || '');
-        const pipeAxis = _axisFromCosinesText(comp.attributes?.PIPE_AXIS_COSINES || '');
+        let supportAxis = _axisFromCosinesText(attrs.AXIS_COSINES || attrs['AXIS-COSINES'] || '');
 
-    if (supportAxis && !isFixed) {
+        if (!supportAxis) {
+            supportAxis = _axisFromSupportDirection(supportDirection);
+            if (supportAxis && supportKind === 'UNKNOWN') {
+                supportKind = supportDirection === 'UP' || supportDirection === 'DOWN' ? 'REST' : 'GUIDE';
+            }
+        }
+
+        const pipeAxis = _axisFromCosinesText(attrs.PIPE_AXIS_COSINES || attrs['PIPE-AXIS-COSINES'] || '');
+
+        if (supportAxis && !isFixed) {
             const verticalness = Math.abs(supportAxis.dot(up));
             // Keep explicit REST/+Y supports vertical; axis-cosines in upstream data
             // may represent restraint DOF orientation, not the visual support arrow.
@@ -1090,9 +1778,9 @@ export class PcfViewer3D {
             } else {
                 return [];
             }
-    } else if (supportKind === 'UNKNOWN') {
-        return [];
-    }
+        } else if (supportKind === 'UNKNOWN') {
+            supportKind = 'REST';
+        }
 
         if (supportKind === 'RIGID') supportKind = 'ANCHOR';
         const frame = _buildSupportFrame(pipeAxis, supportAxis);
@@ -1219,10 +1907,12 @@ export class PcfViewer3D {
         this._orthoCamera.right = half * aspect;
         this._orthoCamera.top = half;
         this._orthoCamera.bottom = -half;
-        this._orthoCamera.near = -maxDim * 20;
-        this._orthoCamera.far = maxDim * 20;
 
         const dist = maxDim * 1.5;
+        this._orthoCamera.near = 0.1;
+        this._orthoCamera.far = Math.max(1000, maxDim * 80, dist + maxDim * 20);
+        this._orthoCamera.zoom = 1;
+        this._orthoCamera.up.copy(_verticalVector());
         this._orthoCamera.position.set(
             centre.x + dist,
             centre.y + dist,
@@ -1231,8 +1921,9 @@ export class PcfViewer3D {
         this._orthoCamera.lookAt(centre);
         this._orthoCamera.updateProjectionMatrix();
 
-        this._perspCamera.near = 1;
-        this._perspCamera.far = maxDim * 50;
+        this._perspCamera.near = 0.1;
+        this._perspCamera.far = Math.max(1000, maxDim * 80);
+        this._perspCamera.up.copy(_verticalVector());
         this._perspCamera.position.set(
             centre.x + dist,
             centre.y + dist,
@@ -1252,6 +1943,7 @@ export class PcfViewer3D {
             this.controls.target.copy(centre);
             this.controls.update();
         }
+        this._queueOverlayRefresh();
         this._emitTrace('fit-all', { maxDim });
     }
 
@@ -1263,23 +1955,35 @@ export class PcfViewer3D {
             this._pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
             this._pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
             this._raycaster.setFromCamera(this._pointer, this.camera);
-            const hits = this._raycaster.intersectObjects(this._componentGroup.children, false);
-            const hit = hits.find((entry) => entry.object?.userData?.componentId);
-            if (!hit) {
-                if (this._navMode === 'measure') this._clearMeasureOverlay();
+            const hits = this._raycaster.intersectObject(this._componentGroup, true);
+            let picked = null;
+            for (const entry of hits) {
+                let obj = entry.object || null;
+                while (obj && !obj.userData?.componentId) obj = obj.parent || null;
+                if (obj?.userData?.componentId) {
+                    picked = {
+                        componentId: obj.userData.componentId,
+                        point: entry.point?.clone?.() || null,
+                    };
+                    break;
+                }
+            }
+            if (!picked) {
+                if (this._navMode === 'measure') {
+                    this._emitTrace('measure-miss', {});
+                }
                 return;
             }
             if (this._navMode === 'measure') {
-                this._selectComponent(hit.object.userData.componentId);
-                this._captureMeasurePoint(hit.point.clone(), hit.object.userData.componentId);
+                this._captureMeasurePoint(picked.point, picked.componentId);
                 this._emitTrace('pointer-measure', {
-                    componentId: hit.object?.userData?.componentId || null,
-                    point: hit.point?.toArray?.() || [],
+                    componentId: picked.componentId || null,
+                    point: picked.point?.toArray?.() || [],
                 });
                 return;
             }
-            this._selectComponent(hit.object.userData.componentId);
-            this._emitTrace('pointer-select', { componentId: hit.object?.userData?.componentId || null });
+            this._selectComponent(picked.componentId);
+            this._emitTrace('pointer-select', { componentId: picked.componentId || null });
         };
         this.renderer.domElement.addEventListener('pointerdown', this._onPointerDown);
     }
@@ -1320,27 +2024,83 @@ export class PcfViewer3D {
         this._emitTrace('selection-change', { componentId, componentType: selected?.type || null });
     }
 
+    _measurementAxisBasis() {
+        const srcX = mapCoord({ x: 1, y: 0, z: 0 }) || new THREE.Vector3(1, 0, 0);
+        const srcY = mapCoord({ x: 0, y: 1, z: 0 }) || new THREE.Vector3(0, 1, 0);
+        const srcZ = mapCoord({ x: 0, y: 0, z: 1 }) || new THREE.Vector3(0, 0, 1);
+        return {
+            x: srcX.clone().normalize(),
+            y: srcY.clone().normalize(),
+            z: srcZ.clone().normalize(),
+        };
+    }
+
+    _axisAlignedDelta(start, end) {
+        const delta = end.clone().sub(start);
+        const basis = this._measurementAxisBasis();
+        return {
+            dx: delta.dot(basis.x),
+            dy: delta.dot(basis.y),
+            dz: delta.dot(basis.z),
+            basis,
+        };
+    }
+
     _captureMeasurePoint(point, componentId) {
         if (!point) return;
         if (this._measurePoints.length >= 2) {
             this._clearMeasureOverlay();
         }
         this._measurePoints.push(point.clone());
-        this._renderMeasurePoint(point, this._measurePoints.length);
-        if (this._measurePoints.length === 2) {
+        const index = this._measurePoints.length;
+        this._renderMeasurePoint(point, index);
+        this._emitTrace('measure-point', {
+            componentId: componentId || null,
+            index,
+            point: point.toArray(),
+        });
+        if (index === 2) {
             const start = this._measurePoints[0];
             const end = this._measurePoints[1];
             const distance = start.distanceTo(end);
-            this._renderMeasureSegment(start, end, distance);
+            const aligned = this._axisAlignedDelta(start, end);
+            const dx = aligned.dx;
+            const dy = aligned.dy;
+            const dz = aligned.dz;
+            this._renderMeasureSegment(start, end, {
+                distance,
+                dx,
+                dy,
+                dz,
+                basisX: aligned.basis.x.toArray(),
+                basisY: aligned.basis.y.toArray(),
+                basisZ: aligned.basis.z.toArray(),
+            });
             this._reportMeasurement({
                 componentId: componentId || null,
                 distance,
+                dx,
+                dy,
+                dz,
+                absDx: Math.abs(dx),
+                absDy: Math.abs(dy),
+                absDz: Math.abs(dz),
+                axisMode: CURRENT_VERTICAL_AXIS,
                 start: start.toArray(),
                 end: end.toArray(),
             });
             this._emitTrace('measure-complete', {
                 componentId: componentId || null,
                 distance,
+                dx,
+                dy,
+                dz,
+                absDx: Math.abs(dx),
+                absDy: Math.abs(dy),
+                absDz: Math.abs(dz),
+                axisMode: CURRENT_VERTICAL_AXIS,
+                start: start.toArray(),
+                end: end.toArray(),
             });
         } else {
             this._reportMeasurement(null);
@@ -1357,12 +2117,50 @@ export class PcfViewer3D {
         this._measureVisuals.push(marker);
     }
 
-    _renderMeasureSegment(start, end, distance) {
+    _renderMeasureSegment(start, end, summary) {
+        const distance = Number(summary?.distance || 0);
+        const dx = Number(summary?.dx || 0);
+        const dy = Number(summary?.dy || 0);
+        const dz = Number(summary?.dz || 0);
+        const basisX = Array.isArray(summary?.basisX)
+            ? new THREE.Vector3().fromArray(summary.basisX).normalize()
+            : new THREE.Vector3(1, 0, 0);
+        const basisY = Array.isArray(summary?.basisY)
+            ? new THREE.Vector3().fromArray(summary.basisY).normalize()
+            : new THREE.Vector3(0, 1, 0);
+        const basisZ = Array.isArray(summary?.basisZ)
+            ? new THREE.Vector3().fromArray(summary.basisZ).normalize()
+            : new THREE.Vector3(0, 0, 1);
+
+        const addLine = (from, to, color, dashed = false, dashSize = 70, gapSize = 36) => {
+            const lineGeometry = new THREE.BufferGeometry().setFromPoints([from, to]);
+            const lineMaterial = dashed
+                ? new THREE.LineDashedMaterial({
+                    color,
+                    dashSize,
+                    gapSize,
+                    transparent: true,
+                    opacity: 0.95,
+                    depthTest: false,
+                })
+                : new THREE.LineBasicMaterial({
+                    color,
+                    transparent: true,
+                    opacity: 0.9,
+                    depthTest: false,
+                });
+            const line = new THREE.Line(lineGeometry, lineMaterial);
+            if (dashed) line.computeLineDistances();
+            this._measureOverlayGroup.add(line);
+            this._measureVisuals.push(line);
+            return line;
+        };
+
         const lineGeometry = new THREE.BufferGeometry().setFromPoints([start, end]);
         const lineMaterial = new THREE.LineDashedMaterial({
             color: 0xf8fafc,
-            dashSize: 90,
-            gapSize: 45,
+            dashSize: 85,
+            gapSize: 42,
             transparent: true,
             opacity: 0.95,
             depthTest: false,
@@ -1372,37 +2170,51 @@ export class PcfViewer3D {
         this._measureOverlayGroup.add(line);
         this._measureLine = line;
 
-        const midpoint = start.clone().lerp(end, 0.5);
-        const label = this._buildMeasureLabel(`${distance.toFixed(1)} mm`);
-        label.position.copy(midpoint);
-        this._measureOverlayGroup.add(label);
-        this._measureLabel = label;
-    }
+        const dir = end.clone().sub(start);
+        const length = dir.length();
+        if (length > 0.1) {
+            const unitDir = dir.clone().normalize();
+            const arrowLength = Math.max(24, Math.min(100, length * 0.14));
+            const arrowRadius = Math.max(7, Math.min(20, arrowLength * 0.34));
+            const coneGeometry = new THREE.ConeGeometry(arrowRadius, arrowLength, 12);
+            const coneMaterial = new THREE.MeshBasicMaterial({ color: 0xf8fafc, depthTest: false });
+            const headA = new THREE.Mesh(coneGeometry, coneMaterial);
+            headA.position.copy(start.clone().addScaledVector(unitDir, arrowLength * 0.5));
+            headA.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), unitDir);
+            const headB = new THREE.Mesh(coneGeometry, coneMaterial.clone());
+            headB.position.copy(end.clone().addScaledVector(unitDir, -arrowLength * 0.5));
+            headB.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), unitDir.clone().negate());
+            this._measureOverlayGroup.add(headA);
+            this._measureOverlayGroup.add(headB);
+            this._measureVisuals.push(headA);
+            this._measureVisuals.push(headB);
+        }
 
-    _buildMeasureLabel(text) {
-        const div = document.createElement('div');
-        div.style.cssText = `
-            padding: 6px 10px;
-            border-radius: 999px;
-            background: rgba(10, 21, 38, 0.92);
-            border: 1px solid rgba(125, 211, 252, 0.36);
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
-            color: #eef6ff;
-            font: 700 12px/1 "Segoe UI", sans-serif;
-            white-space: nowrap;
-            pointer-events: none;
-        `;
-        div.textContent = text;
-        return new CSS2DObject(div);
+        // Axis component lines for CAD-like dimensional reading.
+        const xPoint = start.clone().addScaledVector(basisX, dx);
+        const xyPoint = xPoint.clone().addScaledVector(basisY, dy);
+        const xyzPoint = xyPoint.clone().addScaledVector(basisZ, dz);
+        if (Math.abs(dx) > 0.001) addLine(start, xPoint, 0xff7373, false);
+        if (Math.abs(dy) > 0.001) addLine(xPoint, xyPoint, 0x84f5a3, false);
+        if (Math.abs(dz) > 0.001) addLine(xyPoint, xyzPoint, 0x7dbdff, false);
+
+        const midpoint = start.clone().lerp(end, 0.5);
+        this.setOverlayLayerData(OVERLAY_LAYER_IDS.MEASURE, [{
+            worldPos: midpoint,
+            text: `${distance.toFixed(1)} mm | dx ${dx.toFixed(1)} dy ${dy.toFixed(1)} dz ${dz.toFixed(1)}`,
+            lift: 0,
+        }]);
+        this.setOverlayLayerVisibility(OVERLAY_LAYER_IDS.MEASURE, true);
     }
 
     _clearMeasureOverlay() {
+        const hadMeasure =
+            this._measurePoints.length > 0 ||
+            this._measureVisuals.length > 0 ||
+            !!this._measureLine;
         this._measurePoints = [];
         this._reportMeasurement(null);
-        if (this._measureLabel) {
-            this._measureOverlayGroup.remove(this._measureLabel);
-            this._measureLabel = null;
-        }
+        this.setOverlayLayerData(OVERLAY_LAYER_IDS.MEASURE, []);
         if (this._measureLine) {
             if (this._measureLine.geometry) this._measureLine.geometry.dispose();
             if (this._measureLine.material) this._measureLine.material.dispose();
@@ -1415,6 +2227,7 @@ export class PcfViewer3D {
             this._measureOverlayGroup.remove(visual);
         }
         this._measureVisuals = [];
+        if (hadMeasure) this._emitTrace('measure-cleared', {});
     }
 
     _makeSelectedMaterial(material) {
@@ -1464,6 +2277,7 @@ export class PcfViewer3D {
             this._clipPlanes = [];
         }
         this._applyCurrentSectionClipping();
+        this._queueOverlayRefresh();
         this._emitTrace('section-mode', { mode: normalized });
     }
 
@@ -1472,6 +2286,7 @@ export class PcfViewer3D {
         this._clipPlanes = [];
         this._removeSectionVisual();
         this._applyCurrentSectionClipping();
+        this._queueOverlayRefresh();
         this._emitTrace('section-disable', {});
     }
 
@@ -1489,12 +2304,9 @@ export class PcfViewer3D {
         const box = new THREE.Box3().setFromObject(this._componentGroup);
         if (box.isEmpty()) return;
         this._sectionBounds = box.clone();
-        const cut = CURRENT_VERTICAL_AXIS === 'Z'
-            ? box.getCenter(new THREE.Vector3()).z
-            : box.getCenter(new THREE.Vector3()).y;
-        const normal = CURRENT_VERTICAL_AXIS === 'Z'
-            ? new THREE.Vector3(0, 0, -1)
-            : new THREE.Vector3(0, -1, 0);
+        const centre = box.getCenter(new THREE.Vector3());
+        const cut = centre.y;
+        const normal = new THREE.Vector3(0, -1, 0);
         this._clipPlanes = [new THREE.Plane(normal, cut)];
         this._renderSectionPlaneVisual(normal, cut, box);
     }
@@ -1542,27 +2354,36 @@ export class PcfViewer3D {
     setSectionBoxPadding(padding = 0) {
         if (this._sectionMode !== 'BOX' || !this._sectionBounds) this.setSectionMode('BOX');
         if (!this._sectionBounds) return;
+        const sectionSize = this._sectionBounds.getSize(new THREE.Vector3());
+        const minExtent = Math.max(1, Math.min(sectionSize.x, sectionSize.y, sectionSize.z));
+        const maxExtent = Math.max(1, Math.max(sectionSize.x, sectionSize.y, sectionSize.z));
+        const requested = Number(padding || 0);
+        const minPad = -Math.max(1, minExtent * 0.45);
+        const maxPad = Math.max(100, maxExtent * 2.5);
+        const clamped = THREE.MathUtils.clamp(requested, minPad, maxPad);
         const box = this._sectionBounds.clone();
-        box.expandByScalar(Number(padding) || 0);
+        box.expandByScalar(clamped);
         this._applyBoxPlanes(box);
         this._renderSectionBoxVisual(box);
-        this._emitTrace('section-box-adjust', { padding: Number(padding) || 0 });
+        this._queueOverlayRefresh();
+        this._emitTrace('section-box-adjust', { padding: clamped, requested });
     }
 
     setSectionPlaneOffset(offset = 0) {
         if (this._sectionMode !== 'PLANE_UP' || !this._sectionBounds) this.setSectionMode('PLANE_UP');
         if (!this._sectionBounds) return;
+        const sectionSize = this._sectionBounds.getSize(new THREE.Vector3());
+        const maxExtent = Math.max(1, Math.max(sectionSize.x, sectionSize.y, sectionSize.z));
+        const requested = Number(offset || 0);
+        const clamped = THREE.MathUtils.clamp(requested, -maxExtent * 2.5, maxExtent * 2.5);
         const centre = this._sectionBounds.getCenter(new THREE.Vector3());
-        const cut = CURRENT_VERTICAL_AXIS === 'Z'
-            ? centre.z + Number(offset || 0)
-            : centre.y + Number(offset || 0);
-        const normal = CURRENT_VERTICAL_AXIS === 'Z'
-            ? new THREE.Vector3(0, 0, -1)
-            : new THREE.Vector3(0, -1, 0);
+        const cut = centre.y + clamped;
+        const normal = new THREE.Vector3(0, -1, 0);
         this._clipPlanes = [new THREE.Plane(normal, cut)];
         this._renderSectionPlaneVisual(normal, cut, this._sectionBounds);
         this._applyCurrentSectionClipping();
-        this._emitTrace('section-plane-adjust', { offset: Number(offset) || 0 });
+        this._queueOverlayRefresh();
+        this._emitTrace('section-plane-adjust', { offset: clamped, requested });
     }
 
     _renderSectionBoxVisual(box) {
@@ -1604,6 +2425,7 @@ export class PcfViewer3D {
             this.controls.object.up.copy(upVec);
             this.controls.update();
         }
+        this._queueOverlayRefresh();
     }
 
     applyHeatmap(options = {}) {
@@ -1666,12 +2488,17 @@ export class PcfViewer3D {
 
     _rebuildLegendLabels(components) {
         const cfg = this.viewerConfig || {};
+        if (this._legendLabelGroup) {
+            this.scene.remove(this._legendLabelGroup);
+            this._legendLabelGroup = null;
+        }
         if (cfg.disableAllSettings || cfg.legend?.canvasLabels?.enabled === false) return;
         const mode = cfg.legend?.mode || 'none';
         const wantLegendLabels = mode !== 'none';
         const wantNodeLabels = !!cfg.legend?.canvasLabels?.showNodeIds;
         if (!wantLegendLabels && !wantNodeLabels) return;
         const maxPerLabel = Number(cfg.legend?.canvasLabels?.maxPerLabel || 3);
+        const maxLegendLabels = Number(cfg.legend?.canvasLabels?.maxLegendLabels || 36);
         const fontSize = Number(cfg.legend?.canvasLabels?.fontSize || 16);
         const textColor = cfg.legend?.canvasLabels?.textColor || '#ffffff';
         const bg = cfg.legend?.canvasLabels?.background || '#111827cc';
@@ -1718,15 +2545,21 @@ export class PcfViewer3D {
             }
         }
 
-        if (!labels.size) return;
-        this._legendLabelGroup = new THREE.Group();
+        if (!labels.size || maxLegendLabels <= 0) return;
+        const sampledEntries = [];
         for (const [label, positions] of labels.entries()) {
             const dedup = this._shuffleArray(positions).slice(0, maxPerLabel);
             for (const p of dedup) {
-                const sprite = this._makeTextSprite(label, { fontSize, textColor, background: bg, padding: pad });
-                sprite.position.copy(p);
-                this._legendLabelGroup.add(sprite);
+                sampledEntries.push({ label, pos: p });
             }
+        }
+        const finalEntries = this._shuffleArray(sampledEntries).slice(0, maxLegendLabels);
+        if (!finalEntries.length) return;
+        this._legendLabelGroup = new THREE.Group();
+        for (const entry of finalEntries) {
+            const sprite = this._makeTextSprite(entry.label, { fontSize, textColor, background: bg, padding: pad });
+            sprite.position.copy(entry.pos);
+            this._legendLabelGroup.add(sprite);
         }
         if (this._legendLabelGroup.children.length) {
             this.scene.add(this._legendLabelGroup);
@@ -1783,6 +2616,145 @@ export class PcfViewer3D {
         if (!base) return null;
         const offset = (comp?.bore ? comp.bore / 2 : 25);
         return base.clone().add(vertical.clone().normalize().multiplyScalar(offset * 1.2));
+    }
+
+    _componentLengthMm(comp) {
+        const sourceLength = Number(comp?.source?.LENGTH ?? comp?.source?.L ?? comp?.source?.LEN);
+        if (Number.isFinite(sourceLength) && sourceLength > 0) return sourceLength;
+
+        const mapPoint = (point) => {
+            if (!point) return null;
+            return mapCoord(point);
+        };
+        const segmentLength = (a, b) => {
+            const av = mapPoint(a);
+            const bv = mapPoint(b);
+            if (!av || !bv) return 0;
+            return av.distanceTo(bv);
+        };
+
+        const type = String(comp?.type || '').toUpperCase();
+        const pts = Array.isArray(comp?.points) ? comp.points : [];
+
+        if ((type === 'ELBOW' || type === 'BEND') && comp?.centrePoint && pts[0] && pts[1]) {
+            const p1 = mapPoint(pts[0]);
+            const p2 = mapPoint(pts[1]);
+            const c = mapPoint(comp.centrePoint);
+            if (p1 && p2 && c) {
+                const v1 = p1.clone().sub(c);
+                const v2 = p2.clone().sub(c);
+                const r1 = v1.length();
+                const r2 = v2.length();
+                if (r1 > 0.001 && r2 > 0.001) {
+                    const dot = THREE.MathUtils.clamp(v1.clone().normalize().dot(v2.clone().normalize()), -1, 1);
+                    const angle = Math.acos(dot);
+                    const radius = (r1 + r2) / 2;
+                    if (Number.isFinite(angle) && angle > 0.001 && angle < Math.PI - 0.001) {
+                        return radius * angle;
+                    }
+                }
+            }
+        }
+
+        if (type === 'TEE' && comp?.centrePoint) {
+            let total = 0;
+            if (pts[0]) total += segmentLength(pts[0], comp.centrePoint);
+            if (pts[1]) total += segmentLength(comp.centrePoint, pts[1]);
+            if (comp?.branch1Point) total += segmentLength(comp.centrePoint, comp.branch1Point);
+            if (total > 0.001) return total;
+        }
+
+        if (pts.length >= 2) {
+            let total = 0;
+            for (let i = 1; i < pts.length; i += 1) {
+                total += segmentLength(pts[i - 1], pts[i]);
+            }
+            if (total > 0.001) return total;
+        }
+
+        return null;
+    }
+
+    _rebuildLengthLabels(components) {
+        const cfg = this.viewerConfig || {};
+        if (cfg.disableAllSettings || !cfg.lengthLabels?.enabled) {
+            this.setOverlayLayerData(OVERLAY_LAYER_IDS.LENGTH, []);
+            this._emitTrace('length-labels-built', { count: 0 });
+            return;
+        }
+
+        const precision = Math.max(0, Number(cfg.lengthLabels?.precision ?? 1));
+        const maxLabels = Math.max(0, Number(cfg.lengthLabels?.maxLabels ?? 500));
+        const minGap = Math.max(10, Number(cfg.lengthLabels?.minWorldGap ?? 90));
+        const offsetScale = Math.max(0.2, Number(cfg.lengthLabels?.offsetScale ?? 1));
+        const minScreenGap = Math.max(10, Math.round(minGap * 0.18));
+        const vertical = _verticalVector().clone().normalize();
+        const placedPositions = [];
+        const placedScreens = [];
+        let count = 0;
+        const viewport = new THREE.Vector2(
+            Number(this.container?.clientWidth || 0),
+            Number(this.container?.clientHeight || 0)
+        );
+        const projectToScreen = (worldPos) => {
+            if (!this.camera || !worldPos || viewport.x <= 0 || viewport.y <= 0) return null;
+            const ndc = worldPos.clone().project(this.camera);
+            if (!Number.isFinite(ndc.x) || !Number.isFinite(ndc.y) || !Number.isFinite(ndc.z)) return null;
+            return {
+                x: (ndc.x * 0.5 + 0.5) * viewport.x,
+                y: (-ndc.y * 0.5 + 0.5) * viewport.y,
+                z: ndc.z,
+            };
+        };
+
+        const rows = [];
+        for (const comp of components || []) {
+            if (count >= maxLabels) break;
+            const length = this._componentLengthMm(comp);
+            if (!Number.isFinite(length) || length <= 0.001) continue;
+
+            const basePos = this._componentLabelPosition(comp, vertical);
+            if (!basePos) continue;
+
+            const bore = Number(comp?.bore || 25);
+            const baseLift = Math.max(8, bore * 0.35) * offsetScale;
+            const liftVector = vertical.clone();
+            const candidate = basePos.clone().add(liftVector.clone().multiplyScalar(baseLift));
+            const liftStep = Math.max(12, minGap * 0.55);
+            let tries = 0;
+            let screenPoint = projectToScreen(candidate);
+            if (!screenPoint || screenPoint.z < -1.05 || screenPoint.z > 1.05) continue;
+            while (tries < 8) {
+                const worldOverlap = placedPositions.some((p) => p.distanceTo(candidate) < minGap);
+                const screenOverlap = placedScreens.some((p) => {
+                    const dx = p.x - screenPoint.x;
+                    const dy = p.y - screenPoint.y;
+                    return (dx * dx) + (dy * dy) < (minScreenGap * minScreenGap);
+                });
+                if (!worldOverlap && !screenOverlap) break;
+                candidate.add(liftVector.clone().multiplyScalar(liftStep));
+                screenPoint = projectToScreen(candidate);
+                if (!screenPoint || screenPoint.z < -1.05 || screenPoint.z > 1.05) break;
+                tries += 1;
+            }
+            if (!screenPoint || screenPoint.z < -1.05 || screenPoint.z > 1.05) continue;
+            const stillScreenOverlap = placedScreens.some((p) => {
+                const dx = p.x - screenPoint.x;
+                const dy = p.y - screenPoint.y;
+                return (dx * dx) + (dy * dy) < (minScreenGap * minScreenGap);
+            });
+            if (stillScreenOverlap) continue;
+            placedPositions.push(candidate.clone());
+            placedScreens.push(screenPoint);
+            rows.push({
+                worldPos: candidate,
+                text: `L ${length.toFixed(precision)} mm`,
+                lift: 0,
+            });
+            count += 1;
+        }
+        this.setOverlayLayerData(OVERLAY_LAYER_IDS.LENGTH, rows);
+        this._emitTrace('length-labels-built', { count });
     }
 
     _makeTextSprite(text, { fontSize = 16, textColor = '#fff', background = '#111827cc', padding = 4 } = {}) {
@@ -1878,35 +2850,12 @@ export class PcfViewer3D {
      * @param {Array<{pos:{x,y,z}, text:string}>} nodes
      */
     loadMessageCircleNodes(nodes = []) {
-        // Clear previous labels
-        while (this._msgCircleGroup.children.length) {
-            this._msgCircleGroup.remove(this._msgCircleGroup.children[0]);
+        const rows = [];
+        for (const node of nodes || []) {
+            if (!node?.pos || !node?.text) continue;
+            rows.push({ pos: node.pos, text: String(node.text), lift: 8 });
         }
-        for (const { pos, text } of nodes) {
-            if (!pos || !text) continue;
-            const div = document.createElement('div');
-            div.textContent = text;
-            div.style.cssText = `
-                font: 700 10px/1 "Courier New", monospace;
-                color: #fff;
-                background: #1a56db;
-                padding: 2px 5px;
-                border: 2px solid #93c5fd;
-                border-radius: 999px;
-                pointer-events: none;
-                white-space: nowrap;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.4);
-                letter-spacing: 0.03em;
-            `;
-            const obj = new CSS2DObject(div);
-            const mapped = mapCoord(pos);
-            if (mapped) {
-                obj.position.copy(mapped);
-                obj.position.y += 8;
-            }
-            obj.userData.type = 'msg-circle-label';
-            this._msgCircleGroup.add(obj);
-        }
+        this.setOverlayLayerData(OVERLAY_LAYER_IDS.MESSAGE_CIRCLE, rows);
     }
 
     /**
@@ -1914,41 +2863,19 @@ export class PcfViewer3D {
      * @param {Array<{pos:{x,y,z}, text:string}>} nodes
      */
     loadMessageSquareNodes(nodes = []) {
-        while (this._msgSquareGroup.children.length) {
-            this._msgSquareGroup.remove(this._msgSquareGroup.children[0]);
+        const rows = [];
+        for (const node of nodes || []) {
+            if (!node?.pos || !node?.text) continue;
+            rows.push({ pos: node.pos, text: String(node.text), lift: 14 });
         }
-        for (const { pos, text } of nodes) {
-            if (!pos || !text) continue;
-            const div = document.createElement('div');
-            div.textContent = text;
-            div.style.cssText = `
-                font: 600 9px/1.2 "Courier New", monospace;
-                color: #1a1a00;
-                background: rgba(255,235,59,0.92);
-                padding: 2px 5px;
-                border: 1px solid rgba(161,120,0,0.6);
-                border-radius: 3px;
-                pointer-events: none;
-                white-space: nowrap;
-                box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-                max-width: 220px;
-                overflow: hidden;
-                text-overflow: ellipsis;
-            `;
-            const obj = new CSS2DObject(div);
-            const mapped = mapCoord(pos);
-            if (mapped) {
-                obj.position.copy(mapped);
-                obj.position.y += 14;
-            }
-            obj.userData.type = 'msg-square-label';
-            this._msgSquareGroup.add(obj);
-        }
+        this.setOverlayLayerData(OVERLAY_LAYER_IDS.MESSAGE_SQUARE, rows);
     }
 
     /** Tear down — clean up all resources */
     dispose() {
         if (this._animId) cancelAnimationFrame(this._animId);
+        if (this._overlayRaf) cancelAnimationFrame(this._overlayRaf);
+        this._overlayRaf = 0;
         window.removeEventListener('resize', this._onResize);
         if (this.controls) this.controls.dispose();
         this._clearMeasureOverlay();
@@ -1985,6 +2912,10 @@ export class PcfViewer3D {
         if (this._heatmapPanelEl?.parentNode === this.container) {
             this.container.removeChild(this._heatmapPanelEl);
         }
+        this._overlayGroups.clear();
+        this._overlayLayerData.clear();
+        this._overlayLayerVisibility.clear();
+        this._overlayLayerFields.clear();
         this._reportMeasurement(null);
         this._emitTrace('dispose', {});
     }

@@ -5,11 +5,12 @@
 export const ACTIONS = {
   NAV_SELECT: 'NAV_SELECT',
   NAV_ORBIT: 'NAV_ORBIT',
+  NAV_PAN: 'NAV_PAN',
   MEASURE_TOOL: 'MEASURE_TOOL',
+  VIEW_MARQUEE_ZOOM: 'VIEW_MARQUEE_ZOOM',
   NAV_PLAN_X: 'NAV_PLAN_X',
   NAV_ROTATE_Y: 'NAV_ROTATE_Y',
   NAV_ROTATE_Z: 'NAV_ROTATE_Z',
-  NAV_PAN: 'NAV_PAN',
   VIEW_FIT_ALL: 'VIEW_FIT_ALL',
   VIEW_FIT_SELECTION: 'VIEW_FIT_SELECTION',
   VIEW_TOGGLE_PROJECTION: 'VIEW_TOGGLE_PROJECTION',
@@ -46,6 +47,9 @@ export function executeViewerAction(viewer, actionId) {
       break;
     case ACTIONS.NAV_PAN:
       viewer.setNavMode?.('pan');
+      break;
+    case ACTIONS.VIEW_MARQUEE_ZOOM:
+      viewer.setNavMode?.('marquee');
       break;
     case ACTIONS.VIEW_FIT_ALL:
       viewer.fitAll?.();

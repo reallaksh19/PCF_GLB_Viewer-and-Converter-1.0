@@ -97,43 +97,6 @@ export function parseXmlElements(rawText, log) {
     fluidDensity: null,
     matName: null,
   };
-  const xmlRestraintByNode = new Map();
-  const upsertXmlRestraint = (patch) => {
-    const node = Number(patch?.node || 0);
-    if (!Number.isFinite(node) || node <= 0) return;
-    const existing = xmlRestraintByNode.get(node);
-    const patchDofs = Array.isArray(patch?.dofs)
-      ? [...new Set(patch.dofs.map((d) => Number(d)).filter((d) => Number.isFinite(d)).map((d) => Math.trunc(d)))]
-      : [];
-    if (!existing) {
-      xmlRestraintByNode.set(node, {
-        ptr: 0,
-        node,
-        type: String(patch?.type || 'Restraint (XML)'),
-        rawType: String(patch?.rawType || patch?.type || 'Restraint (XML)'),
-        supportBlock: String(patch?.supportBlock || ''),
-        supportDescription: String(patch?.supportDescription || ''),
-        isAnchor: !!patch?.isAnchor,
-        dofs: patchDofs,
-        stiffness: Number.isFinite(Number(patch?.stiffness)) ? Number(patch.stiffness) : 1e13,
-        axisCosines: patch?.axisCosines || null,
-        friction: Number.isFinite(Number(patch?.friction)) ? Number(patch.friction) : null,
-        gap: Number.isFinite(Number(patch?.gap)) ? Number(patch.gap) : null,
-        guid: String(patch?.guid || ''),
-      });
-      return;
-    }
-    if (patch?.type && /^Restraint \(XML\)$/i.test(existing.type)) existing.type = String(patch.type);
-    if (patch?.rawType && /^Restraint \(XML\)$/i.test(existing.rawType)) existing.rawType = String(patch.rawType);
-    if (patch?.supportBlock && !existing.supportBlock) existing.supportBlock = String(patch.supportBlock);
-    if (patch?.supportDescription && !existing.supportDescription) existing.supportDescription = String(patch.supportDescription);
-    if (patch?.axisCosines && !existing.axisCosines) existing.axisCosines = patch.axisCosines;
-    if (!existing.guid && patch?.guid) existing.guid = String(patch.guid);
-    if (patchDofs.length) {
-      existing.dofs = [...new Set([...(existing.dofs || []), ...patchDofs])].sort((a, b) => a - b);
-    }
-    existing.isAnchor = existing.isAnchor || !!patch?.isAnchor;
-  };
 
   elNodes.forEach((el, idx) => {
     // ── Geometry (always explicit per-element) ────────────────────────────
@@ -229,15 +192,9 @@ export function parseXmlElements(rawText, log) {
     [...el.querySelectorAll('DISPLACEMENTS')].forEach(disp => {
       const nodeNum = Math.round(parseFloat(disp.getAttribute('NODE_NUM') ?? from));
       if (nodeNum > 0) {
-        upsertXmlRestraint({
-          node: nodeNum,
-          type: 'Fixed (XML)',
-          rawType: 'Fixed (XML)',
-          supportDescription: 'Fixed (XML)',
-          isAnchor: true,
-          dofs: [1, 2, 3, 4, 5, 6],
-          stiffness: 1e13,
-        });
+        const rPtr = restraints.length + 1;
+        restraints.push({ ptr: rPtr, node: nodeNum, type: 'Fixed (XML)', isAnchor: true, dofs: [1,2,3,4,5,6], stiffness: 1e13 });
+        element.restPtr = rPtr;
       }
     });
   });
@@ -246,13 +203,7 @@ export function parseXmlElements(rawText, log) {
   [...doc.querySelectorAll('BEND')].forEach((bend) => {
     const nearNode = Math.round(parseFloat(bend.getAttribute('NEAR_NODE') ?? 0));
     const radius   = parseFloat(bend.getAttribute('BEND_RADIUS') ?? 0);
-    // Bind the bend to the element that approaches it (terminates at nearNode).
-    // If none exists (e.g., node 0 is the nearNode), fallback to the one starting from it.
-    let elIdx = elements.findIndex(e => e.to === nearNode);
-    if (elIdx < 0) {
-      elIdx = elements.findIndex(e => e.from === nearNode);
-    }
-    
+    const elIdx = elements.findIndex(e => e.to === nearNode || e.from === nearNode);
     if (elIdx >= 0) {
       elements[elIdx].hasBend = true;
       const bPtr = bends.length + 1;
@@ -263,77 +214,17 @@ export function parseXmlElements(rawText, log) {
 
   // ── Restraints ───────────────────────────────────────────────────────────
   [...doc.querySelectorAll('RESTRAINT')].forEach(r => {
-    const nodeRaw = attrNum(r, 'NODE');
-    const node = Math.round(Number(nodeRaw || 0));
-    if (!Number.isFinite(node) || node <= 0) return;
-
-    const rawTypeToken = String(attrStr(r, 'RESTRAINT_TYPE') || attrStr(r, 'TYPE') || '').trim();
-    const tag = String(attrStr(r, 'TAG') || '').trim();
-    const guid = String(attrStr(r, 'GUID') || '').trim();
-    const sourceText = [rawTypeToken, tag].filter(Boolean).join(' ').trim();
-    const supportBlockMatch = sourceText.toUpperCase().match(/\bCA\d+\b/);
-    const supportBlock = supportBlockMatch ? supportBlockMatch[0] : '';
-    const type = tag || (rawTypeToken ? `Type ${rawTypeToken}` : 'Restraint (XML)');
-    const rawType = sourceText || type;
-
-    const x = attrNum(r, 'XCOSINE');
-    const y = attrNum(r, 'YCOSINE');
-    const z = attrNum(r, 'ZCOSINE');
-    const axisCosines = (x !== null && y !== null && z !== null)
-      ? { x, y, z }
-      : null;
-
-    const isAnchor = /\bANCHOR\b|\bFIX(ED)?\b/.test(rawType.toUpperCase());
-    const dofs = [];
-    const typeCode = Number(rawTypeToken);
-    if (isAnchor) {
-      dofs.push(1, 2, 3, 4, 5, 6);
-    } else if (Number.isFinite(typeCode) && typeCode >= 1 && typeCode <= 6) {
-      dofs.push(Math.trunc(typeCode));
-    } else if (axisCosines) {
-      const ax = Math.abs(axisCosines.x);
-      const ay = Math.abs(axisCosines.y);
-      const az = Math.abs(axisCosines.z);
-      if (ay >= ax && ay >= az) dofs.push(2);
-      else if (ax >= ay && ax >= az) dofs.push(1);
-      else dofs.push(3);
+    const node = Math.round(parseFloat(r.getAttribute('NODE') ?? 0));
+    const type = r.getAttribute('RESTRAINT_TYPE') ?? 'Fixed';
+    if (node > 0) {
+      const rPtr = restraints.length + 1;
+      restraints.push({ ptr: rPtr, node, type, isAnchor: type.includes('ANCHOR') || type === 'Fixed', dofs: [1,2,3], stiffness: 1e13 });
+      const elIdx = elements.findIndex(e => e.to === node || e.from === node);
+      if (elIdx >= 0) {
+        elements[elIdx].restPtr = rPtr;
+      }
     }
-
-    upsertXmlRestraint({
-      node,
-      type,
-      rawType,
-      supportBlock,
-      supportDescription: tag || rawTypeToken || '',
-      isAnchor,
-      dofs,
-      stiffness: 1e13,
-      axisCosines,
-      friction: attrNum(r, 'FRIC_COEF'),
-      gap: attrNum(r, 'GAP'),
-      guid,
-    });
   });
-
-  const restraintPtrByNode = new Map();
-  const orderedRestraints = [...xmlRestraintByNode.values()].sort((a, b) => a.node - b.node);
-  for (const item of orderedRestraints) {
-    const ptr = restraints.length + 1;
-    const entry = {
-      ...item,
-      ptr,
-      dofs: Array.isArray(item.dofs) ? item.dofs : [],
-    };
-    restraints.push(entry);
-    restraintPtrByNode.set(item.node, ptr);
-  }
-  if (restraintPtrByNode.size) {
-    elements.forEach((el) => {
-      if (Number.isFinite(Number(el.restPtr)) && Number(el.restPtr) > 0) return;
-      const ptr = restraintPtrByNode.get(el.to) || restraintPtrByNode.get(el.from) || 0;
-      if (ptr > 0) el.restPtr = ptr;
-    });
-  }
 
   // ── Summary log ──────────────────────────────────────────────────────────
   log.push({ level: 'INFO', msg: `XML ELEMENTS: ${elements.length} element(s) → ${Object.keys(nodes).length} node(s)` });

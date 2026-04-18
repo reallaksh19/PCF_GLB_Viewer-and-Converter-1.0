@@ -51,3 +51,24 @@ export function getCaesarMatchAttribute() {
 export function saveCaesarMatchAttribute(attr) {
   localStorage.setItem('caesarMatchAttribute', attr);
 }
+
+// ─── Support Kind Map ─────────────────────────────────────────────────────────
+// Maps SKEY values (PCF support catalog codes) → kind: REST | GUIDE | ANCHOR | SPRING
+// Used as Tier 1.5 in _resolveSupportKind (after explicit SUPPORT-KIND, before direction heuristic)
+
+const DEFAULT_SUPPORT_KIND_MAP = {
+  'CA150': 'REST',
+  'CA100': 'GUIDE',
+};
+
+export function getSupportKindMap() {
+  const saved = localStorage.getItem('supportKindMap');
+  if (saved) {
+    try { return JSON.parse(saved); } catch {}
+  }
+  return { ...DEFAULT_SUPPORT_KIND_MAP };
+}
+
+export function saveSupportKindMap(map) {
+  localStorage.setItem('supportKindMap', JSON.stringify(map));
+}

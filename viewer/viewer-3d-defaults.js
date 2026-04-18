@@ -5,11 +5,12 @@
 export const VIEWER_ACTION_IDS = [
   'NAV_SELECT',
   'NAV_ORBIT',
+  'NAV_PAN',
   'MEASURE_TOOL',
+  'VIEW_MARQUEE_ZOOM',
   'NAV_PLAN_X',
   'NAV_ROTATE_Y',
   'NAV_ROTATE_Z',
-  'NAV_PAN',
   'VIEW_FIT_ALL',
   'VIEW_FIT_SELECTION',
   'VIEW_TOGGLE_PROJECTION',
@@ -89,6 +90,16 @@ export const DEFAULT_VIEWER3D_CONFIG = {
     viewCubeOpacity: 0.85,
     iconSize: 36,
     iconOpacity: 1,
+    smartScale: {
+      enabled: true,
+      multiplier: 1,
+      scrollSensitivity: 0.2,
+      min: 0.65,
+      max: 1.9,
+    },
+    annotations: {
+      messageSquareEnabled: true,
+    },
   },
   componentGeometry: {
     elbowTubeSegments: 24,
@@ -97,6 +108,7 @@ export const DEFAULT_VIEWER3D_CONFIG = {
     valveSphereScale: 1.5,
   },
   supportGeometry: {
+    symbolScale: 2,
     useOriginalStyle: true,
     baseScale: 1,
     restArrowScale: 1,
@@ -128,6 +140,7 @@ export const DEFAULT_VIEWER3D_CONFIG = {
     KeyY: 'NAV_ROTATE_Y',
     KeyZ: 'NAV_ROTATE_Z',
     KeyP: 'NAV_PAN',
+    KeyW: 'VIEW_MARQUEE_ZOOM',
     KeyH: 'VIEW_FIT_ALL',
     KeyF: 'VIEW_FIT_SELECTION',
     KeyV: 'VIEW_TOGGLE_PROJECTION',
@@ -207,6 +220,7 @@ export const DEFAULT_VIEWER3D_CONFIG = {
     canvasLabels: {
       enabled: true,
       maxPerLabel: 3,
+      maxLegendLabels: 36,
       fontSize: 16,
       textColor: '#ffffff',
       background: '#111827cc',
@@ -214,6 +228,28 @@ export const DEFAULT_VIEWER3D_CONFIG = {
       showNodeIds: false,
       maxNodeLabels: 80,
     },
+  },
+  nodes: {
+    enabled: false,
+  },
+  spareOverlays: {
+    spare1: {
+      enabled: false,
+      selectedField: '',
+    },
+    spare2: {
+      enabled: false,
+      selectedField: '',
+    },
+    snapToNearest: true,
+    snapToleranceMm: 180,
+  },
+  lengthLabels: {
+    enabled: false,
+    precision: 1,
+    maxLabels: 500,
+    minWorldGap: 90,
+    offsetScale: 1,
   },
   heatmap: {
     enabled: false,
@@ -244,5 +280,18 @@ export const DEFAULT_VIEWER3D_CONFIG = {
     heatmap: true,
     legend: true,
     sectioning: true,
+  },
+  mockData: {
+    enabledOnLocalhostOnly: true,
+    mock1: {
+      label: 'Mock 1',
+      fileName: '10inch_3branch_3D.pcf',
+      pcfText: '',
+    },
+    mock2: {
+      label: 'Mock 2',
+      fileName: 'STEAM_SISO - Copy.pcf',
+      pcfText: '',
+    },
   },
 };

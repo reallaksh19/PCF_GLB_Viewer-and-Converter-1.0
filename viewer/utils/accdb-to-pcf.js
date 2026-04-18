@@ -356,9 +356,8 @@ function _coordOrNull(pt) {
 }
 
 function _coordForPcf(pt) {
-  if (!pt) return { x: 1, y: 0, z: 0 };
-  if ((pt.x ?? 0) === 0 && (pt.y ?? 0) === 0 && (pt.z ?? 0) === 0) return { x: 1, y: 0, z: 0 };
-  return pt;
+  if (!pt) return { x: 0, y: 0, z: 0 };
+  return { x: pt.x ?? 0, y: pt.y ?? 0, z: pt.z ?? 0 };
 }
 
 export function normalizeToPCFWithContinuity(csvRows, options = {}) {
@@ -393,48 +392,85 @@ export function normalizeToPCFWithContinuity(csvRows, options = {}) {
   const segments = [];
   const emittedSupports = new Set();
   let seq = 1;
-  for (const r of csvRows) {
-    const p1 = _coordOrNull(nodePos.get(r.FROM_NODE));
-    const p2 = _coordOrNull(nodePos.get(r.TO_NODE));
+  for (let i = 0; i < csvRows.length; i++) {
+    const r = csvRows[i];
     const comp = _classifyComponent(r);
     const bore = Number(r.DIAMETER || 0);
-    const controlNode = comp === 'BEND'
-      ? Number(r.BND_NODE1 || r.BND_NODE2 || 0)
-      : 0;
 
-    segments.push({
-      METHOD: 'ContEngineMethod',
-      SEQ_NO: seq++,
-      PIPELINE_REFERENCE: r.LINE_NO || '',
-      COMPONENT_TYPE: comp,
-      REF_NO: `${r.LINE_NO || 'LINE'}_${r.ELEMENTID ?? seq}`,
-      FROM_NODE: r.FROM_NODE,
-      TO_NODE: r.TO_NODE,
-      EP1: p1,
-      EP2: p2,
-      DELTA_X: Number(r.DELTA_X || 0),
-      DELTA_Y: Number(r.DELTA_Y || 0),
-      DELTA_Z: Number(r.DELTA_Z || 0),
-      CONTROL_NODE: controlNode || undefined,
-      DIAMETER: bore,
-      WALL_THICK: Number(r.WALL_THICK || 0),
-      MATERIAL: r.MATERIAL_NAME || '',
-      T1: Number(r.T1 || 0), T2: Number(r.T2 || 0), T3: Number(r.T3 || 0), T4: Number(r.T4 || 0), T5: Number(r.T5 || 0), T6: Number(r.T6 || 0), T7: Number(r.T7 || 0), T8: Number(r.T8 || 0), T9: Number(r.T9 || 0),
-      P1: Number(r.P1 || 0), P2: Number(r.P2 || 0), P3: Number(r.P3 || 0), P4: Number(r.P4 || 0), P5: Number(r.P5 || 0), P6: Number(r.P6 || 0), P7: Number(r.P7 || 0), P8: Number(r.P8 || 0), P9: Number(r.P9 || 0),
-      P_HYDRO: Number(r.P_HYDRO || 0),
-      CORR_ALLOW: Number(r.CORR_ALLOW || 0),
-      INSUL_DENSITY: Number(r.INSUL_DENSITY || 0),
-      FLUID_DENSITY: Number(r.FLUID_DENSITY || 0),
-      RIGID_WEIGHT: Number(r.RGD_WGT || 0),
-      SUPPORT_NAME: '',
-      SUPPORT_GUID: '',
-      SUPPORT_COORDS: null,
-      SKEY: comp === 'FLANGE' ? 'FLWN'
-        : comp === 'VALVE' ? 'VBFL'
-        : comp === 'BEND' ? 'BEBW'
-        : comp === 'TEE' ? 'TEBW'
-        : comp.startsWith('REDUCER') ? 'RCBW' : '',
-    });
+    // Always resolve p1/p2 from the current row for any restraint block below
+    const p1 = _coordOrNull(nodePos.get(r.FROM_NODE));
+    const p2 = _coordOrNull(nodePos.get(r.TO_NODE));
+
+    // Look-ahead for Bends (CAESAR II defines bends over 3 nodes usually)
+    if (r.BEND_PTR > 0 && i + 2 < csvRows.length) {
+      const r1 = csvRows[i + 1];
+      const r2 = csvRows[i + 2];
+      const bp1 = _coordOrNull(nodePos.get(r1.FROM_NODE));
+      const bp2 = _coordOrNull(nodePos.get(r2.TO_NODE));
+      const cp  = _coordOrNull(nodePos.get(r1.TO_NODE));
+
+      segments.push({
+        METHOD: 'ContEngineMethod',
+        SEQ_NO: seq++,
+        PIPELINE_REFERENCE: r.LINE_NO || '',
+        COMPONENT_TYPE: 'BEND',
+        REF_NO: `${r.LINE_NO || 'LINE'}_${r.ELEMENTID ?? seq}`,
+        FROM_NODE: r1.FROM_NODE,
+        TO_NODE: r2.TO_NODE,
+        EP1: bp1,
+        EP2: bp2,
+        CP: cp,
+        DELTA_X: Number(r1.DELTA_X || 0) + Number(r2.DELTA_X || 0),
+        DELTA_Y: Number(r1.DELTA_Y || 0) + Number(r2.DELTA_Y || 0),
+        DELTA_Z: Number(r1.DELTA_Z || 0) + Number(r2.DELTA_Z || 0),
+        CONTROL_NODE: r1.TO_NODE,
+        DIAMETER: bore,
+        WALL_THICK: Number(r.WALL_THICK || 0),
+        MATERIAL: r.MATERIAL_NAME || '',
+        T1: Number(r.T1 || 0), T2: Number(r.T2 || 0), T3: Number(r.T3 || 0),
+        P1: Number(r.P1 || 0), P2: Number(r.P2 || 0), P3: Number(r.P3 || 0),
+        P_HYDRO: Number(r.P_HYDRO || 0),
+        CORR_ALLOW: Number(r.CORR_ALLOW || 0),
+        INSUL_DENSITY: Number(r.INSUL_DENSITY || 0),
+        FLUID_DENSITY: Number(r.FLUID_DENSITY || 0),
+        RIGID_WEIGHT: Number(r.RGD_WGT || 0),
+        SUPPORT_NAME: '', SUPPORT_GUID: '', SUPPORT_COORDS: null,
+        SKEY: 'BEBW',
+      });
+      i += 2; // Consume the extra 2 rows
+    } else {
+      segments.push({
+        METHOD: 'ContEngineMethod',
+        SEQ_NO: seq++,
+        PIPELINE_REFERENCE: r.LINE_NO || '',
+        COMPONENT_TYPE: comp,
+        REF_NO: `${r.LINE_NO || 'LINE'}_${r.ELEMENTID ?? seq}`,
+        FROM_NODE: r.FROM_NODE,
+        TO_NODE: r.TO_NODE,
+        EP1: p1,
+        EP2: p2,
+        CP: comp === 'TEE' ? p2 : null,
+        DELTA_X: Number(r.DELTA_X || 0),
+        DELTA_Y: Number(r.DELTA_Y || 0),
+        DELTA_Z: Number(r.DELTA_Z || 0),
+        CONTROL_NODE: 0,
+        DIAMETER: bore,
+        WALL_THICK: Number(r.WALL_THICK || 0),
+        MATERIAL: r.MATERIAL_NAME || '',
+        T1: Number(r.T1 || 0), T2: Number(r.T2 || 0), T3: Number(r.T3 || 0),
+        P1: Number(r.P1 || 0), P2: Number(r.P2 || 0), P3: Number(r.P3 || 0),
+        P_HYDRO: Number(r.P_HYDRO || 0),
+        CORR_ALLOW: Number(r.CORR_ALLOW || 0),
+        INSUL_DENSITY: Number(r.INSUL_DENSITY || 0),
+        FLUID_DENSITY: Number(r.FLUID_DENSITY || 0),
+        RIGID_WEIGHT: Number(r.RGD_WGT || 0),
+        SUPPORT_NAME: '', SUPPORT_GUID: '', SUPPORT_COORDS: null,
+        SKEY: comp === 'FLANGE' ? 'FLWN'
+          : comp === 'VALVE' ? 'VBFL'
+          : comp === 'TEE' ? 'TEBW'
+          : comp.startsWith('REDUCER') ? 'RCBW' : '',
+      });
+    }
 
     // Restraints connected by REST_PTR to TO-node are exported as SUPPORT rows.
     if (r.RST_TYPE || r.RST_RAW_TYPE || r.RST_AXIS_COSINES || r.RST_DOFS) {
@@ -544,6 +580,10 @@ export function buildPcfFromContinuity(segments, options = {}) {
     const b = _coordForPcf(s.EP2);
     lines.push(`    END-POINT    ${_fmtCoord(a.x, decimals)} ${_fmtCoord(a.y, decimals)} ${_fmtCoord(a.z, decimals)} ${_fmtCoord(s.DIAMETER, decimals)}`);
     lines.push(`    END-POINT    ${_fmtCoord(b.x, decimals)} ${_fmtCoord(b.y, decimals)} ${_fmtCoord(b.z, decimals)} ${_fmtCoord(s.DIAMETER, decimals)}`);
+    if (s.CP && (s.COMPONENT_TYPE === 'BEND' || s.COMPONENT_TYPE === 'TEE')) {
+      const cp = _coordForPcf(s.CP);
+      lines.push(`    CENTRE-POINT    ${_fmtCoord(cp.x, decimals)} ${_fmtCoord(cp.y, decimals)} ${_fmtCoord(cp.z, decimals)}`);
+    }
     if (s.COMPONENT_TYPE === 'PIPE' && s.PIPELINE_REFERENCE) {
       lines.push(`    PIPELINE-REFERENCE export ${s.PIPELINE_REFERENCE}`);
     }

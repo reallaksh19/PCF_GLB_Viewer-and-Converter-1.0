@@ -67,6 +67,8 @@ function getKnownUserDataAttributes(userData) {
 function mapCanonicalTypeToViewerType(type) {
   const normalized = toText(type || 'UNKNOWN').toUpperCase();
   if (normalized === 'REDUCER-CONCENTRIC' || normalized === 'REDUCER-ECCENTRIC') return 'REDUCER';
+  // PCF files use both ELBOW and BEND keywords; the viewer uses BEND for arc rendering with CENTRE-POINT.
+  if (normalized === 'ELBOW') return 'BEND';
   return normalized;
 }
 
@@ -81,6 +83,83 @@ function glbComponentFromCanonicalItem(item) {
     ep2: cloneJson(normalized.ep2),
     attributes: buildPcfAttributesFromCanonicalItem(normalized),
   };
+}
+
+/**
+ * Convert one canonical item into the viewer-component shape expected by PcfViewer3D.render().
+ * This is the single mapping point for all data sources (PCF, ACCDB, GLB) into the 3D viewer.
+ *
+ * Output shape:
+ *   { id, type, points:[{x,y,z,bore}], centrePoint, branch1Point, coOrds, bore, fixingAction, attributes, source }
+ *
+ * @param {object} item  Canonical item (normalized or raw)
+ * @returns {object}
+ */
+export function viewerComponentFromCanonicalItem(item) {
+  const n = normalizeCanonicalItem(item);
+  const type = mapCanonicalTypeToViewerType(n.type);
+  const bore = n.bore || toFiniteNumber(n.ep1 && n.ep1.bore) || toFiniteNumber(n.ep2 && n.ep2.bore) || 0;
+
+  const toPoint = (p) => p ? { x: p.x, y: p.y, z: p.z, bore: toFiniteNumber(p.bore) ?? bore } : null;
+
+  const p1 = toPoint(n.ep1);
+  const p2 = toPoint(n.ep2);
+  const supportCoord = type === 'SUPPORT'
+    ? toPoint(n.supportCoord || n.ep1)
+    : null;
+
+  // §10.5.4: for BEND/ELBOW with no CENTRE-POINT in the source file, derive the
+  // corner-intersection CP so the arc renderer gets a valid non-degenerate centre.
+  let centrePoint = n.cp ? { x: n.cp.x, y: n.cp.y, z: n.cp.z } : null;
+  if (!centrePoint && (type === 'BEND') && p1 && p2) {
+    centrePoint = _bendCornerCP(p1, p2);
+  }
+
+  return {
+    id:           n.id,
+    type,
+    points:       p1 && p2 ? [p1, p2] : (p1 ? [p1] : []),
+    centrePoint,
+    branch1Point: n.bp  ? { x: n.bp.x,  y: n.bp.y,  z: n.bp.z  } : null,
+    coOrds:       supportCoord,
+    bore,
+    fixingAction: '',
+    attributes:   buildPcfAttributesFromCanonicalItem(n),
+    source:       n,
+  };
+}
+
+/**
+ * §10.5.4 — Compute the corner-intersection CP for a 90° BEND.
+ * CP shares one axis coordinate with EP1 and the complementary axis with EP2,
+ * such that dist(CP, EP1) = dist(CP, EP2) = bend_radius.
+ * The midpoint fallback gives a 180° angle which is degenerate (renders as a cylinder).
+ */
+function _bendCornerCP(p1, p2) {
+  const dist3 = (a, b) => Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2);
+  const bore = toFiniteNumber(p1.bore) ?? 0;
+
+  const candidates = [
+    { x: p1.x, y: p2.y, z: p1.z },
+    { x: p2.x, y: p1.y, z: p1.z },
+    { x: p1.x, y: p1.y, z: p2.z },
+    { x: p2.x, y: p1.y, z: p2.z },
+    { x: p1.x, y: p2.y, z: p2.z },
+    { x: p2.x, y: p2.y, z: p1.z },
+  ];
+
+  let best = null;
+  let bestErr = Infinity;
+  for (const cp of candidates) {
+    const d1 = dist3(cp, p1);
+    const d2 = dist3(cp, p2);
+    if (d1 < 0.1 || d2 < 0.1) continue;
+    const err = Math.abs(d1 - d2);
+    if (err < bestErr) { bestErr = err; best = cp; }
+  }
+
+  if (!best || bestErr > 1.0) return null;
+  return { x: best.x, y: best.y, z: best.z, bore };
 }
 
 /**

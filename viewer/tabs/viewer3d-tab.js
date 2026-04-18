@@ -8,27 +8,39 @@ import { addTraceEvent } from '../core/logger.js';
 import { buildUniversalCSV, normalizeToPCF } from '../utils/accdb-to-pcf.js';
 import { parsePcfText } from '../js/pcf2glb/pcf/parsePcfText.js';
 import { normalizePcfModel } from '../js/pcf2glb/pcf/normalizePcfModel.js';
+import { pcfxDocumentFromPcfText } from '../pcfx/Pcfx_PcfAdapter.js';
+import { viewerComponentFromCanonicalItem } from '../pcfx/Pcfx_GlbAdapter.js';
 import { PcfViewer3D } from '../viewer-3d.js';
 import { getResolvedViewer3DConfig } from '../viewer-3d-config.js';
 import { resolveActionOrder, executeViewerAction } from '../viewer-actions.js';
 import { buildComponentPanelModel } from '../viewer3d/component-panel-model.js';
 import { renderConfig } from './config-tab.js';
+import { importFromRawFile } from '../js/pcf2glb/import/ImportFromRawParser.js';
 
 let _viewer = null;
 let _listenersRegistered = false;
 let _shortcutHandler = null;
+let _shortcutContainer = null;
 let _selectedComponent = null;
 let _directPcfData = null;
+let _ribbonCollapsed = false;
+let _leftSettingsCollapsed = false;
+let _mockSeedPayload = null;
+const _spareOverlayRuntime = {
+  spare1: { rows: [], fields: [], fileName: '' },
+  spare2: { rows: [], fields: [], fileName: '' },
+};
 
 const ACTION_LABELS = {
   NAV_SELECT: 'Select',
   NAV_ORBIT: 'Orbit',
+  NAV_PAN: 'Pan',
   MEASURE_TOOL: 'Measure',
+  VIEW_MARQUEE_ZOOM: 'Zoom',
   NAV_PLAN_X: 'PlanX',
   NAV_ROTATE_Y: 'RotY',
   NAV_ROTATE_Z: 'RotZ',
-  NAV_PAN: 'Pan',
-  VIEW_FIT_ALL: 'FitAll',
+  VIEW_FIT_ALL: 'Reset',
   VIEW_FIT_SELECTION: 'FitSel',
   VIEW_TOGGLE_PROJECTION: 'Proj',
   SNAP_ISO_NW: 'NW',
@@ -41,24 +53,27 @@ const ACTION_LABELS = {
 };
 
 const ACTION_ICONS = {
-  NAV_SELECT: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M5 3v14l4-3 3 7 2-1-3-7h6z"/></svg>',
-  NAV_ORBIT: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="12" rx="9" ry="3.5" transform="rotate(-20 12 12)"/><ellipse cx="12" cy="12" rx="9" ry="3.5" transform="rotate(70 12 12)"/><circle cx="12" cy="12" r="1.8" fill="currentColor" stroke="none"/></svg>',
-  MEASURE_TOOL: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 16l12-12"/><path d="M13 4h7v7"/><path d="M4 20h16"/></svg>',
-  NAV_PLAN_X: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12a7 7 0 1 1 7 7"/><polyline points="10,17 12,19 10,21" fill="currentColor" stroke="currentColor"/></svg>',
-  NAV_ROTATE_Y: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="12" rx="3.5" ry="8"/><line x1="3" y1="12" x2="21" y2="12" stroke-dasharray="3,2"/></svg>',
-  NAV_ROTATE_Z: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="12" rx="8" ry="3.5"/><line x1="12" y1="3" x2="12" y2="21" stroke-dasharray="3,2"/></svg>',
-  NAV_PAN: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14m-7-7h14m-14 0l3-3m-3 3l3 3m11-3l-3-3m3 3l-3 3"/></svg>',
-  VIEW_FIT_ALL: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 8h8v8H8z"/></svg>',
-  VIEW_FIT_SELECTION: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="7" y="7" width="10" height="10" rx="1"/><circle cx="12" cy="12" r="2"/></svg>',
-  VIEW_TOGGLE_PROJECTION: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16v16H4z M4 4l5 5 M20 4l-5 5 M4 20l5-5 M20 20l-5-5"/></svg>',
-  SNAP_ISO_NW: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><text x="12" y="15" text-anchor="middle" font-size="7" fill="currentColor">NW</text></svg>',
-  SNAP_ISO_NE: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><text x="12" y="15" text-anchor="middle" font-size="7" fill="currentColor">NE</text></svg>',
-  SNAP_ISO_SW: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><text x="12" y="15" text-anchor="middle" font-size="7" fill="currentColor">SW</text></svg>',
-  SNAP_ISO_SE: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><text x="12" y="15" text-anchor="middle" font-size="7" fill="currentColor">SE</text></svg>',
-  SECTION_BOX: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" stroke-dasharray="4 2"/><path d="M4 12h16"/></svg>',
-  SECTION_PLANE_UP: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 14h16"/><path d="M12 18V6"/><path d="M8 10l4-4 4 4"/></svg>',
-  SECTION_DISABLE: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M8 8l8 8"/></svg>',
+  NAV_SELECT: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/></svg>',
+  NAV_ORBIT: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
+  MEASURE_TOOL: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="8" rx="2" ry="2"/><path d="M6 8v4"/><path d="M10 8v4"/><path d="M14 8v4"/><path d="M18 8v4"/></svg>',
+  NAV_PLAN_X: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>',
+  NAV_ROTATE_Y: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>',
+  NAV_ROTATE_Z: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>',
+  NAV_PAN: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 10 4 15l5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg>',
+  VIEW_MARQUEE_ZOOM: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="12" height="12" rx="1" stroke-dasharray="3 2"/><circle cx="17" cy="17" r="3"/><path d="m21 21-2.15-2.15"/></svg>',
+  VIEW_FIT_ALL: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9V5h4"/><path d="M19 9V5h-4"/><path d="M5 15v4h4"/><path d="M19 15v4h-4"/></svg>',
+  VIEW_FIT_SELECTION: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9V5h4"/><path d="M19 9V5h-4"/><path d="M5 15v4h4"/><path d="M19 15v4h-4"/><circle cx="12" cy="12" r="3"/></svg>',
+  VIEW_TOGGLE_PROJECTION: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v18H3z"/><path d="m3 3 18 18"/><path d="m21 3-18 18"/></svg>',
+  SNAP_ISO_NW: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="4"/><path d="M7 7h4"/><path d="M7 11v-4"/></svg>',
+  SNAP_ISO_NE: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="4"/><path d="M17 7h-4"/><path d="M17 11v-4"/></svg>',
+  SNAP_ISO_SW: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="4"/><path d="M7 17h4"/><path d="M7 13v4"/></svg>',
+  SNAP_ISO_SE: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="4"/><path d="M17 17h-4"/><path d="M17 13v4"/></svg>',
+  SECTION_BOX: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>',
+  SECTION_PLANE_UP: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>',
+  SECTION_DISABLE: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>',
 };
+
+const SPARE_ICON_UPLOAD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><rect x="4" y="16" width="16" height="4" rx="1.5"/></svg>';
 
 export function renderViewer3D(container) {
   const cfg = getResolvedViewer3DConfig(state);
@@ -74,7 +89,27 @@ export function renderViewer3D(container) {
       _clearDirectPcfData();
       _rerenderIfActive();
     });
-    on('viewer3d-config-changed', () => _rerenderIfActive());
+    // Fast-path: overlay visibility toggles that do NOT need a geometry re-render.
+    // Heatmap updates are intentionally excluded — they need a full re-render so
+    // applyHeatmap() runs with fresh state.
+    const OVERLAY_ONLY_REASONS = new Set([
+      'nodes-toggled', 'line-labels-toggled', 'length-labels-toggled',
+      'spare1-updated', 'spare2-updated',
+    ]);
+    on('viewer3d-config-changed', (payload) => {
+      const reason = payload && payload.reason;
+      if (reason && OVERLAY_ONLY_REASONS.has(reason)) {
+        if (!_viewer) { _rerenderIfActive(); return; }
+        // Update the viewer's live config reference
+        const liveCfg = getResolvedViewer3DConfig(state);
+        _viewer.viewerConfig = liveCfg;
+        // Apply overlay layer visibility only — no geometry rebuild
+        const liveDataSource = _directPcfData || _buildParsedDataSource(state.parsed);
+        _applyOverlayLayersToViewer(liveCfg, liveDataSource);
+        return;
+      }
+      _rerenderIfActive();
+    });
     on('support-mapping-changed', () => _rerenderIfActive());
     on('tab-changed', (tabId) => {
       if (tabId !== 'viewer3d') _disposeViewer();
@@ -96,72 +131,173 @@ export function renderViewer3D(container) {
   if (isLiveMount) state.viewer3dComponents = components;
 
   const summary = _summariseComponents(components);
-  const actions = resolveActionOrder(cfg);
+  const resolvedActions = resolveActionOrder(cfg);
+  const actions = resolvedActions.includes('VIEW_FIT_ALL')
+    ? resolvedActions
+    : ['VIEW_FIT_ALL', ...resolvedActions];
   const showComponentPanel = !cfg.disableAllSettings && cfg.featureFlags?.componentPanel !== false && cfg.componentPanel?.enabled !== false;
   const addOnDisabledAttr = cfg.disableAllSettings ? 'disabled' : '';
+  const verticalAxis = String(cfg.coordinateMap?.verticalAxis || 'Z').toUpperCase() === 'Y' ? 'Y' : 'Z';
+  const isLocalhost = _isLocalhostHost();
+  const showMockButtons = !cfg.disableAllSettings && isLocalhost && cfg.mockData?.enabledOnLocalhostOnly !== false;
+  const spare1Fields = _spareOverlayRuntime.spare1.fields || [];
+  const spare2Fields = _spareOverlayRuntime.spare2.fields || [];
+  const spare1SelectedField = _resolvePreferredSpareField(cfg.spareOverlays?.spare1?.selectedField, spare1Fields);
+  const spare2SelectedField = _resolvePreferredSpareField(cfg.spareOverlays?.spare2?.selectedField, spare2Fields);
+  const statusMessage = dataSource.fileName
+    ? `${components.length} rendered component(s) from ${dataSource.fileName}`
+    : 'Load a .PCF file to build the model';
 
   container.innerHTML = `
     <div class="geo-tab ${themeClass}" id="section-viewer3d">
-      ${_renderToolbar(cfg, actions)}
       <div class="geo-main-area" style="width:100%;">
-        <div class="geo-top-controls">
-          <strong style="letter-spacing:0.05em;text-transform:uppercase;color:var(--color-primary-dark);">3D Viewer</strong>
-          <span class="tab-note" style="margin:0;">
-            ${dataSource.fileName ? `${components.length} rendered component(s) from ${dataSource.fileName}` : 'Load a .PCF file to build the model'}
-          </span>
-          <label class="btn-secondary file-label" style="margin-left:12px;">
-            <input type="file" id="viewer3d-pcf-input" accept=".pcf,.PCF" style="display:none">
-            Load .PCF
-          </label>
+        <div class="geo-ribbon-region ${_ribbonCollapsed ? 'is-collapsed' : ''}" id="viewer3d-ribbon-region">
+          <div class="geo-top-ribbon">
+            ${_renderToolbar(cfg, actions)}
+            <div class="geo-ribbon-utility">
+              ${showMockButtons ? '<button class="btn-secondary" id="viewer3d-load-mock1" title="Load seeded localhost mock data set 1">Mock 1</button>' : ''}
+              ${showMockButtons ? '<button class="btn-secondary" id="viewer3d-load-mock2" title="Load seeded localhost mock data set 2">Mock 2</button>' : ''}
+              ${showMockButtons ? '<button class="btn-secondary" id="viewer3d-load-mock-xml" title="Load Mock XML data">Mock xml</button>' : ''}
+              <label class="btn-icon viewer3d-icon-btn viewer3d-mini-icon-btn viewer3d-spare-upload" title="Load Spare 1 Data">
+                <input type="file" id="viewer3d-spare1-input" accept=".csv,text/csv" style="display:none">
+                <span class="viewer3d-icon-glyph">${SPARE_ICON_UPLOAD}</span>
+                <span class="viewer3d-icon-label">Spare 1</span>
+              </label>
+              <label class="btn-icon viewer3d-icon-btn viewer3d-mini-icon-btn viewer3d-spare-upload" title="Load Spare 2 Data">
+                <input type="file" id="viewer3d-spare2-input" accept=".csv,text/csv" style="display:none">
+                <span class="viewer3d-icon-glyph">${SPARE_ICON_UPLOAD}</span>
+                <span class="viewer3d-icon-label">Spare 2</span>
+              </label>
+              <label class="btn-secondary file-label">
+                <input type="file" id="viewer3d-pcf-input" accept=".pcf,.PCF" style="display:none">
+                Load .PCF
+              </label>
+              <label class="btn-secondary file-label" id="viewer3d-import-raw-label" title="Import piping model directly from ACCDB/MDB, XML, or PDF">
+                <input type="file" id="viewer3d-import-raw-input" accept=".accdb,.mdb,.xml,.pdf" style="display:none">
+                Import ACCDB/XML/PDF
+              </label>
+              <button class="btn-secondary" id="viewer3d-open-config">Config</button>
+              <button
+                class="ribbon-toggle-btn ${_ribbonCollapsed ? 'is-collapsed' : ''}"
+                id="viewer3d-ribbon-toggle"
+                aria-label="${_ribbonCollapsed ? 'Expand ribbon' : 'Collapse ribbon'}"
+                aria-expanded="${_ribbonCollapsed ? 'false' : 'true'}"
+                title="${_ribbonCollapsed ? 'Expand ribbon' : 'Collapse ribbon'}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m6 9 6 6 6-6"></path>
+                </svg>
+              </button>
+            </div>
+          </div>
 
-          <label class="control-label">
-            Vertical Axis
-            <select id="viewer3d-vertical-axis">
-              <option value="Z" ${String(cfg.coordinateMap?.verticalAxis || 'Z') === 'Z' ? 'selected' : ''}>Z-up</option>
-              <option value="Y" ${String(cfg.coordinateMap?.verticalAxis || 'Z') === 'Y' ? 'selected' : ''}>Y-up</option>
-            </select>
-          </label>
-          <label class="control-label">
-            Legend
-            <select id="viewer3d-top-legend-mode" ${addOnDisabledAttr}>
-              <option value="none" ${String(cfg.legend?.mode || 'none') === 'none' ? 'selected' : ''}>none</option>
-              <option value="od" ${String(cfg.legend?.mode || 'none') === 'od' ? 'selected' : ''}>od</option>
-              <option value="material" ${String(cfg.legend?.mode || 'none') === 'material' ? 'selected' : ''}>material</option>
-              <option value="supportKind" ${String(cfg.legend?.mode || 'none') === 'supportKind' ? 'selected' : ''}>support kind</option>
-              <option value="heatmap" ${String(cfg.legend?.mode || 'none') === 'heatmap' ? 'selected' : ''}>heatmap</option>
-            </select>
-          </label>
-          <label class="control-label">
-            <input type="checkbox" id="viewer3d-top-heatmap-enabled" ${cfg.heatmap?.enabled ? 'checked' : ''} ${addOnDisabledAttr}>
-            Heatmap
-          </label>
-          <label class="control-label">
-            Metric
-            <select id="viewer3d-top-heatmap-metric" ${addOnDisabledAttr}>
-              <option value="T1" ${String(cfg.heatmap?.metric || 'T1') === 'T1' ? 'selected' : ''}>T1</option>
-              <option value="T2" ${String(cfg.heatmap?.metric || 'T1') === 'T2' ? 'selected' : ''}>T2</option>
-              <option value="P1" ${String(cfg.heatmap?.metric || 'T1') === 'P1' ? 'selected' : ''}>P1</option>
-            </select>
-          </label>
-          <label class="control-label" style="margin-left:auto;">
-            Steps
-            <input id="viewer3d-top-heatmap-buckets" type="number" min="2" max="12" style="width:56px" value="${Number(cfg.heatmap?.bucketCount || 5)}" ${addOnDisabledAttr}>
-          </label>
-          <label class="control-label">
-            Box Pad
-            <input id="viewer3d-section-boxpad" type="number" step="50" style="width:64px" value="0">
-          </label>
-          <label class="control-label">
-            Plane Offset
-            <input id="viewer3d-section-planeoffset" type="number" step="50" style="width:64px" value="0">
-          </label>
-          <button class="btn-secondary" id="viewer3d-open-config">Config</button>
-          <button class="btn-secondary" id="viewer3d-fit-btn">Fit All</button>
-          <button class="btn-secondary" id="viewer3d-fit-sel-btn">Fit Selection</button>
-          <button class="btn-secondary" id="viewer3d-reset-btn">Reset</button>
         </div>
 
         <div class="geo-body">
+          <aside class="geo-left-panel viewer3d-settings-panel ${_leftSettingsCollapsed ? 'is-collapsed' : ''}" id="viewer3d-settings-panel">
+            <button
+              class="left-panel-toggle-btn ${_leftSettingsCollapsed ? 'is-collapsed' : ''}"
+              id="viewer3d-settings-toggle"
+              aria-label="${_leftSettingsCollapsed ? 'Expand settings panel' : 'Collapse settings panel'}"
+              aria-expanded="${_leftSettingsCollapsed ? 'false' : 'true'}"
+              title="${_leftSettingsCollapsed ? 'Expand settings panel' : 'Collapse settings panel'}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m15 6-6 6 6 6"></path>
+              </svg>
+            </button>
+            <div class="left-panel-body">
+              <div class="left-panel-title">Settings</div>
+
+              <div class="left-panel-group">
+                <div class="left-panel-group-title">Graphics</div>
+                <label class="left-panel-checkbox">
+                  <input type="checkbox" id="viewer3d-top-heatmap-enabled" ${cfg.heatmap?.enabled ? 'checked' : ''} ${addOnDisabledAttr}>
+                  Heatmap
+                </label>
+                <label class="left-panel-label">Metric
+                  <select id="viewer3d-top-heatmap-metric" ${addOnDisabledAttr}>
+                    <option value="T1" ${String(cfg.heatmap?.metric || 'T1') === 'T1' ? 'selected' : ''}>T1</option>
+                    <option value="T2" ${String(cfg.heatmap?.metric || 'T1') === 'T2' ? 'selected' : ''}>T2</option>
+                    <option value="P1" ${String(cfg.heatmap?.metric || 'T1') === 'P1' ? 'selected' : ''}>P1</option>
+                  </select>
+                </label>
+                <label class="left-panel-label">Steps
+                  <input id="viewer3d-top-heatmap-buckets" type="number" min="2" max="12" value="${Number(cfg.heatmap?.bucketCount || 5)}" title="Number of color brackets in the Heatmap" ${addOnDisabledAttr}>
+                </label>
+                <label class="left-panel-checkbox">
+                  <input type="checkbox" id="viewer3d-top-nodes-enabled" ${cfg.nodes?.enabled ? 'checked' : ''} ${addOnDisabledAttr}>
+                  Node No.
+                </label>
+                <label class="left-panel-checkbox">
+                  <input type="checkbox" id="viewer3d-top-line-enabled" ${cfg.overlay?.annotations?.messageSquareEnabled !== false ? 'checked' : ''} ${addOnDisabledAttr}>
+                  Line No.
+                </label>
+                <div class="left-panel-inline-pair">
+                  <label class="left-panel-checkbox">
+                    <input type="checkbox" id="viewer3d-top-spare1-enabled" ${cfg.spareOverlays?.spare1?.enabled ? 'checked' : ''} ${addOnDisabledAttr}>
+                    Spare 1
+                  </label>
+                  <select id="viewer3d-top-spare1-field" class="left-panel-inline-select" ${addOnDisabledAttr} title="Spare 1 field">
+                    ${spare1Fields.length
+                      ? spare1Fields.map((field) => `<option value="${_escAttr(field)}" ${field === spare1SelectedField ? 'selected' : ''}>${_esc(field)}</option>`).join('')
+                      : '<option value="">(load CSV)</option>'}
+                  </select>
+                </div>
+                <div class="left-panel-inline-pair">
+                  <label class="left-panel-checkbox">
+                    <input type="checkbox" id="viewer3d-top-spare2-enabled" ${cfg.spareOverlays?.spare2?.enabled ? 'checked' : ''} ${addOnDisabledAttr}>
+                    Spare 2
+                  </label>
+                  <select id="viewer3d-top-spare2-field" class="left-panel-inline-select" ${addOnDisabledAttr} title="Spare 2 field">
+                    ${spare2Fields.length
+                      ? spare2Fields.map((field) => `<option value="${_escAttr(field)}" ${field === spare2SelectedField ? 'selected' : ''}>${_esc(field)}</option>`).join('')
+                      : '<option value="">(load CSV)</option>'}
+                  </select>
+                </div>
+                <label class="left-panel-checkbox">
+                  <input type="checkbox" id="viewer3d-top-length-enabled" ${cfg.lengthLabels?.enabled ? 'checked' : ''} ${addOnDisabledAttr}>
+                  Length
+                </label>
+                <label class="left-panel-label">Overlay Scale
+                  <input id="viewer3d-overlay-scale" class="left-panel-range" type="range" min="20" max="300" step="5" value="${Math.round(Number(cfg.overlay?.smartScale?.multiplier || 1) * 100)}" ${addOnDisabledAttr}>
+                  <span class="left-panel-range-readout mono" id="viewer3d-overlay-scale-value">${Number(cfg.overlay?.smartScale?.multiplier || 1).toFixed(2)}x</span>
+                </label>
+                <label class="left-panel-label">Support Scale
+                  <input id="viewer3d-support-symbol-scale" class="left-panel-range" type="range" min="50" max="400" step="10" value="${Math.round(Number(cfg.supportGeometry?.symbolScale || 2) * 100)}" ${addOnDisabledAttr}>
+                  <span class="left-panel-range-readout mono" id="viewer3d-support-symbol-scale-value">${Number(cfg.supportGeometry?.symbolScale || 2).toFixed(2)}x</span>
+                </label>
+              </div>
+
+              <div class="left-panel-group">
+                <div class="left-panel-group-title">Clip / Plane</div>
+                <label class="left-panel-label">Clip
+                  <select id="viewer3d-section-mode">
+                    <option value="OFF">Off</option>
+                    <option value="BOX">Box</option>
+                    <option value="PLANE_UP">Plane Up (${verticalAxis})</option>
+                  </select>
+                </label>
+                <label class="left-panel-label">Pad
+                  <input id="viewer3d-section-boxpad" class="left-panel-range" type="range" min="-1000" max="1000" step="50" value="0">
+                  <span class="left-panel-range-readout mono" id="viewer3d-section-boxpad-value">0</span>
+                </label>
+                <label class="left-panel-label">Offset
+                  <input id="viewer3d-section-planeoffset" class="left-panel-range" type="range" min="-2500" max="2500" step="50" value="0">
+                  <span class="left-panel-range-readout mono" id="viewer3d-section-planeoffset-value">0</span>
+                </label>
+              </div>
+
+              <div class="left-panel-group">
+                <div class="left-panel-group-title">View</div>
+                <label class="left-panel-label">Axis
+                  <select id="viewer3d-vertical-axis">
+                    <option value="Z" ${String(cfg.coordinateMap?.verticalAxis || 'Z') === 'Z' ? 'selected' : ''}>Z-up</option>
+                    <option value="Y" ${String(cfg.coordinateMap?.verticalAxis || 'Z') === 'Y' ? 'selected' : ''}>Y-up</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          </aside>
+
           <div class="canvas-wrap" id="viewer3d-canvas-wrap">
             ${components.length
               ? '<div class="canvas-placeholder" id="viewer3d-placeholder" style="display:none;">Load data to render the model</div>'
@@ -172,18 +308,19 @@ export function renderViewer3D(container) {
           <aside class="geo-side-panel viewer3d-summary-panel">
             <div class="side-panel-tabs">
               ${showComponentPanel ? '<button class="panel-tab active" type="button" data-target="v3d-panel-component">Component Panel</button>' : ''}
-              <button class="panel-tab ${showComponentPanel ? '' : 'active'}" type="button" data-target="v3d-panel-summary">Summary / Legend</button>
+              <button class="panel-tab ${showComponentPanel ? '' : 'active'}" type="button" data-target="v3d-panel-summary">Summary</button>
             </div>
             ${showComponentPanel ? `<div class="panel-content active" id="v3d-panel-component" style="display:block;">${_renderComponentPanel(cfg)}</div>` : ''}
             <div class="panel-content ${showComponentPanel ? '' : 'active'}" id="v3d-panel-summary" style="display:${showComponentPanel ? 'none' : 'block'};">
-              ${_renderSummaryLegend(cfg, summary, dataSource, components)}
+              ${_renderSummaryPanel(cfg, summary, dataSource, components)}
             </div>
           </aside>
         </div>
 
-        <div class="geo-status" id="viewer3d-status">
-          <span>${dataSource.kind === 'direct-pcf' ? 'Direct PCF model ready' : (parsed ? 'ACCDB-derived model ready' : 'Waiting for data')}</span>
-          <span>${dataSource.fileName ?? 'No file loaded'}</span>
+        <div class="geo-status-bar" role="status" aria-live="polite">
+          <span class="status-title">3D Viewer</span>
+          <span class="status-separator"></span>
+          <span class="status-message">${_esc(statusMessage)}</span>
         </div>
       </div>
     </div>
@@ -200,6 +337,7 @@ export function renderViewer3D(container) {
 
   _wireSidePanelTabs(container);
   _wireViewerControls(container, cfg, actions);
+  _registerShortcuts(cfg, container);
 
   if (!components.length || !isLiveMount) return;
 
@@ -213,21 +351,66 @@ export function renderViewer3D(container) {
       _updateComponentPanel(container, cfg);
       addTraceEvent({ type: 'selection', category: 'viewer3d', payload: { componentId: comp?.id || null, componentType: comp?.type || null } });
     },
-    onTrace: (evt) => addTraceEvent(evt),
+    onMeasurementChange: (summary) => {
+      if (summary && Number.isFinite(Number(summary.distance))) {
+        _setStatusMessage(container, _formatMeasurementStatus(summary));
+        return;
+      }
+      const mode = String(_viewer?.getNavMode?.() || '');
+      if (mode === 'measure') _setStatusMessage(container, 'Measure: click first point.');
+    },
+    onTrace: (evt) => {
+      addTraceEvent(evt);
+      const traceType = String(evt?.type || '');
+      // When marquee zoom finishes, sync the active button state.
+      if (traceType === 'marquee-zoom-done') {
+        _syncToolbarToNavMode(container);
+      }
+      // Section button active states
+      if (traceType === 'section-mode') {
+        _updateSectionActiveState(container, evt.payload?.mode || 'OFF');
+        _syncSectionModeControl(container, evt.payload?.mode || 'OFF');
+      }
+      if (traceType === 'section-disable') {
+        _updateSectionActiveState(container, 'OFF');
+        _syncSectionModeControl(container, 'OFF');
+      }
+      // Projection toggle indicator
+      if (traceType === 'projection-toggle') {
+        _updateProjectionActiveState(container, evt.payload?.mode || 'orthographic');
+      }
+      // Measurement complete → copy to clipboard
+      if (traceType === 'nav-mode') {
+        const mode = String(evt.payload?.mode || '');
+        if (mode === 'measure') {
+          _setStatusMessage(container, 'Measure: click first point.');
+        } else if (mode === 'marquee') {
+          _setStatusMessage(container, 'Marquee: drag rectangle to zoom.');
+        } else {
+          _setStatusMessage(container, statusMessage);
+        }
+      }
+      if (traceType === 'measure-point') {
+        const index = Number(evt.payload?.index || 0);
+        if (index === 1) _setStatusMessage(container, 'Measure: click second point.');
+      }
+      if (traceType === 'measure-miss') {
+        _setStatusMessage(container, 'Measure: click on model geometry.');
+      }
+      if (traceType === 'measure-complete') {
+        _copyMeasurementToClipboard(evt.payload?.distance);
+        _setStatusMessage(container, _formatMeasurementStatus(evt.payload || {}));
+      }
+      if (traceType === 'measure-cleared') {
+        const mode = String(_viewer?.getNavMode?.() || '');
+        _setStatusMessage(container, mode === 'measure' ? 'Measure: click first point.' : statusMessage);
+      }
+    },
   });
   _viewer.render(components);
-
-  // MESSAGE-CIRCLE node labels (always visible, not tied to showLabels)
-  if (typeof _viewer.loadMessageCircleNodes === 'function') {
-    const nodes = (_directPcfData || {}).messageCircleNodes || [];
-    _viewer.loadMessageCircleNodes(nodes);
-  }
-
-  // MESSAGE-SQUARE annotation labels (always visible)
-  if (typeof _viewer.loadMessageSquareNodes === 'function') {
-    const nodes = (_directPcfData || {}).messageSquareNodes || [];
-    _viewer.loadMessageSquareNodes(nodes);
-  }
+  _syncToolbarToNavMode(container);
+  _syncSectionModeControl(container, _viewer.getSectionMode?.() || 'OFF');
+  _applyOverlayLayersToViewer(cfg, dataSource);
 
   if (cfg.heatmap?.enabled) {
     _viewer.applyHeatmap?.({
@@ -237,7 +420,22 @@ export function renderViewer3D(container) {
       nullColor: cfg.heatmap.nullColor,
     });
   }
-  _registerShortcuts(cfg, actions);
+  // Double-click canvas → fit selection (if something selected) or fit all
+  wrap.addEventListener('dblclick', () => {
+    if (_selectedComponent) {
+      _viewer?.fitSelection?.();
+    } else {
+      _viewer?.fitAll?.();
+    }
+  });
+
+  // Ctrl+Wheel → nudge PLANE_UP section plane offset
+  wrap.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -50 : 50; // mm per notch, invert scroll direction
+    _viewer?.nudgeSectionPlane?.(delta);
+  }, { passive: false });
 }
 
 function _buildParsedDataSource(parsed) {
@@ -266,12 +464,110 @@ function _disposeViewer() {
 }
 
 function _wireViewerControls(container, cfg, actions) {
+  const ribbonRegion = container.querySelector('#viewer3d-ribbon-region');
+  const ribbonToggle = container.querySelector('#viewer3d-ribbon-toggle');
+  const settingsPanel = container.querySelector('#viewer3d-settings-panel');
+  const settingsToggle = container.querySelector('#viewer3d-settings-toggle');
+  const setRibbonCollapsed = (collapsed) => {
+    _ribbonCollapsed = !!collapsed;
+    ribbonRegion?.classList.toggle('is-collapsed', _ribbonCollapsed);
+    if (!ribbonToggle) return;
+    ribbonToggle.classList.toggle('is-collapsed', _ribbonCollapsed);
+    ribbonToggle.setAttribute('aria-expanded', _ribbonCollapsed ? 'false' : 'true');
+    const label = _ribbonCollapsed ? 'Expand ribbon' : 'Collapse ribbon';
+    ribbonToggle.setAttribute('aria-label', label);
+    ribbonToggle.setAttribute('title', label);
+  };
+  setRibbonCollapsed(_ribbonCollapsed);
+  ribbonToggle?.addEventListener('click', () => setRibbonCollapsed(!_ribbonCollapsed));
+
+  const setSettingsCollapsed = (collapsed) => {
+    _leftSettingsCollapsed = !!collapsed;
+    settingsPanel?.classList.toggle('is-collapsed', _leftSettingsCollapsed);
+    if (!settingsToggle) return;
+    settingsToggle.classList.toggle('is-collapsed', _leftSettingsCollapsed);
+    settingsToggle.setAttribute('aria-expanded', _leftSettingsCollapsed ? 'false' : 'true');
+    const label = _leftSettingsCollapsed ? 'Expand settings panel' : 'Collapse settings panel';
+    settingsToggle.setAttribute('aria-label', label);
+    settingsToggle.setAttribute('title', label);
+  };
+  setSettingsCollapsed(_leftSettingsCollapsed);
+  settingsToggle?.addEventListener('click', () => setSettingsCollapsed(!_leftSettingsCollapsed));
+
+  const loadMockData = async (mockKey) => {
+    try {
+      const mock = await _resolveMockPayload(mockKey);
+      const text = String(mock?.pcfText || '');
+      if (!text.trim()) {
+        alert(`Mock payload is empty for ${mockKey}. Update it in Config tab.`);
+        return;
+      }
+      const name = String(mock?.fileName || `${mockKey}.pcf`);
+      _directPcfData = _buildDirectPcfData(text, name);
+      _rerenderIfActive();
+    } catch (error) {
+      console.error(error);
+      alert(`Failed to load ${mockKey}: ${String(error?.message || error)}`);
+    }
+  };
+
+  container.querySelector('#viewer3d-load-mock1')?.addEventListener('click', async () => {
+    await loadMockData('mock1');
+  });
+  container.querySelector('#viewer3d-load-mock2')?.addEventListener('click', async () => {
+    await loadMockData('mock2');
+  });
+  container.querySelector('#viewer3d-load-mock-xml')?.addEventListener('click', async () => {
+    try {
+      const response = await fetch('opt/mock-xml.xml');
+      if (!response.ok) throw new Error('Could not fetch mock xml file.');
+      const text = await response.text();
+      const file = new File([text], 'R-52-2-P_INPUT.XML', { type: 'text/xml' });
+      
+      const { importFromRawFile } = await import('../js/pcf2glb/import/ImportFromRawParser.js');
+      const log = [];
+      const result = await importFromRawFile(file, state, log);
+      
+      if (result.ok && result.directPcfData) {
+        state.fileName = file.name;
+        _directPcfData = result.directPcfData;
+        // ACCDB/XML/PDF: 2nd coordinate (Y) is vertical
+        state.viewer3DConfig.coordinateMap = {
+          ...(state.viewer3DConfig.coordinateMap || {}),
+          verticalAxis: 'Y',
+          axisConvention: 'Y-up',
+          gridPlane: 'auto',
+        };
+        saveStickyState();
+        _rerenderIfActive();
+      } else {
+        alert("Failed to parse mock XML: \n" + (log.length > 0 ? log.join('\n') : 'Unknown error.'));
+      }
+    } catch (error) {
+      console.error(error);
+      alert(`Failed to load Mock XML: ${String(error?.message || error)}`);
+    }
+  });
+
   container.querySelector('#viewer3d-pcf-input')?.addEventListener('change', async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
       const text = await file.text();
       _directPcfData = _buildDirectPcfData(text, file.name);
+      // PCF uses Z as elevation — default to Z-up so the model appears right-side-up.
+      // _verticalVector() always returns Three.js Y (0,1,0) because mapCoord() places
+      // PCF elevation into Three.js Y regardless of mode, so this is safe.
+      if (!state.viewer3DConfig.coordinateMap?.verticalAxis ||
+           state.viewer3DConfig.coordinateMap.verticalAxis === 'Y') {
+        state.viewer3DConfig.coordinateMap = {
+          ...(state.viewer3DConfig.coordinateMap || {}),
+          verticalAxis: 'Z',
+          axisConvention: 'Z-up',
+          gridPlane: 'auto',
+        };
+        saveStickyState();
+      }
       _rerenderIfActive();
     } catch (error) {
       console.error(error);
@@ -280,9 +576,83 @@ function _wireViewerControls(container, cfg, actions) {
       event.target.value = '';
     }
   });
+  const loadSpareCsv = async (event, spareKey) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = _parseSpareCsvData(text);
+      _spareOverlayRuntime[spareKey] = {
+        rows: parsed.rows,
+        fields: parsed.fields,
+        fileName: file.name,
+      };
+      if (!state.viewer3DConfig.spareOverlays) {
+        state.viewer3DConfig.spareOverlays = {
+          spare1: { enabled: false, selectedField: '' },
+          spare2: { enabled: false, selectedField: '' },
+          snapToNearest: true,
+          snapToleranceMm: 180,
+        };
+      }
+      if (!state.viewer3DConfig.spareOverlays[spareKey]) {
+        state.viewer3DConfig.spareOverlays[spareKey] = { enabled: false, selectedField: '' };
+      }
+      state.viewer3DConfig.spareOverlays[spareKey].enabled = true;
+      state.viewer3DConfig.spareOverlays[spareKey].selectedField = _resolvePreferredSpareField(
+        state.viewer3DConfig.spareOverlays[spareKey].selectedField,
+        parsed.fields,
+      );
+      saveStickyState();
+      _setStatusMessage(container, `${spareKey === 'spare1' ? 'Spare 1' : 'Spare 2'} loaded: ${parsed.rows.length} mapped row(s) from ${file.name}.`);
+      emit('viewer3d-config-changed', { source: 'viewer3d-tab', reason: `${spareKey}-loaded` });
+    } catch (error) {
+      console.error(error);
+      alert(`Failed to load ${spareKey}: ${String(error?.message || error)}`);
+    } finally {
+      event.target.value = '';
+    }
+  };
+  container.querySelector('#viewer3d-spare1-input')?.addEventListener('change', async (event) => {
+    await loadSpareCsv(event, 'spare1');
+  });
+  container.querySelector('#viewer3d-spare2-input')?.addEventListener('change', async (event) => {
+    await loadSpareCsv(event, 'spare2');
+  });
+  container.querySelector('#viewer3d-import-raw-input')?.addEventListener('change', async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const label = container.querySelector('#viewer3d-import-raw-label');
+    if (label) label.style.opacity = '0.5';
+    const log = [];
+    try {
+      const result = await importFromRawFile(file, state, log);
+      if (result.ok && result.directPcfData) {
+        _directPcfData = result.directPcfData;
+        state.fileName = file.name;
+        // ACCDB/XML/PDF use Y as the vertical axis (2nd coordinate = elevation)
+        state.viewer3DConfig.coordinateMap = {
+          ...(state.viewer3DConfig.coordinateMap || {}),
+          verticalAxis: 'Y',
+          axisConvention: 'Y-up',
+          gridPlane: 'auto',
+        };
+        saveStickyState();
+        _rerenderIfActive();
+      } else {
+        console.warn('[ImportRaw] Import failed:', log);
+        alert(result.message || 'Import failed — check the browser console for details.');
+      }
+    } catch (err) {
+      console.error('[ImportRaw]', err);
+      alert(`Import error: ${err?.message || err}`);
+    } finally {
+      if (label) label.style.opacity = '';
+      event.target.value = '';
+    }
+  });
   container.querySelector('#viewer3d-fit-btn')?.addEventListener('click', () => _viewer?.fitAll?.());
   container.querySelector('#viewer3d-fit-sel-btn')?.addEventListener('click', () => _viewer?.fitSelection?.());
-  container.querySelector('#viewer3d-reset-btn')?.addEventListener('click', () => _viewer?.fitAll?.());
   container.querySelector('#viewer3d-open-config')?.addEventListener('click', () => {
     const modal = container.querySelector('#viewer3d-config-modal');
     const modalContent = container.querySelector('#viewer3d-config-content');
@@ -300,6 +670,7 @@ function _wireViewerControls(container, cfg, actions) {
 
   container.querySelector('#viewer3d-vertical-axis')?.addEventListener('change', (e) => {
     const axis = String(e.target.value || 'Z').toUpperCase() === 'Y' ? 'Y' : 'Z';
+    _setStatusMessage(container, `Axis changed to ${axis}-up. Plane and measure alignment refreshed.`);
     state.viewer3DConfig.coordinateMap = {
       ...(state.viewer3DConfig.coordinateMap || {}),
       verticalAxis: axis,
@@ -314,15 +685,10 @@ function _wireViewerControls(container, cfg, actions) {
     btn.addEventListener('click', () => {
       const actionId = btn.getAttribute('data-viewer-action');
       executeViewerAction(_viewer, actionId);
+      _updateToolbarActiveState(container, actionId);
     });
   });
 
-  const legendMode = container.querySelector('#viewer3d-top-legend-mode');
-  legendMode?.addEventListener('change', () => {
-    state.viewer3DConfig.legend.mode = legendMode.value;
-    saveStickyState();
-    emit('viewer3d-config-changed', { source: 'viewer3d-tab', reason: 'legend-mode' });
-  });
   const heatmapEnabled = container.querySelector('#viewer3d-top-heatmap-enabled');
   const heatmapMetric = container.querySelector('#viewer3d-top-heatmap-metric');
   const heatmapBuckets = container.querySelector('#viewer3d-top-heatmap-buckets');
@@ -339,35 +705,368 @@ function _wireViewerControls(container, cfg, actions) {
   heatmapMetric?.addEventListener('change', applyHeatmapConfig);
   heatmapBuckets?.addEventListener('change', applyHeatmapConfig);
 
+  const nodesEnabled = container.querySelector('#viewer3d-top-nodes-enabled');
+  nodesEnabled?.addEventListener('change', (e) => {
+    if (!state.viewer3DConfig.nodes) state.viewer3DConfig.nodes = {};
+    state.viewer3DConfig.nodes.enabled = !!e.target.checked;
+    saveStickyState();
+    emit('viewer3d-config-changed', { source: 'viewer3d-tab', reason: 'nodes-toggled' });
+  });
+  const lineEnabled = container.querySelector('#viewer3d-top-line-enabled');
+  lineEnabled?.addEventListener('change', (e) => {
+    if (!state.viewer3DConfig.overlay) state.viewer3DConfig.overlay = {};
+    if (!state.viewer3DConfig.overlay.annotations) state.viewer3DConfig.overlay.annotations = {};
+    state.viewer3DConfig.overlay.annotations.messageSquareEnabled = !!e.target.checked;
+    saveStickyState();
+    emit('viewer3d-config-changed', { source: 'viewer3d-tab', reason: 'line-labels-toggled' });
+  });
+  const lengthEnabled = container.querySelector('#viewer3d-top-length-enabled');
+  lengthEnabled?.addEventListener('change', (e) => {
+    if (!state.viewer3DConfig.lengthLabels) state.viewer3DConfig.lengthLabels = {};
+    state.viewer3DConfig.lengthLabels.enabled = !!e.target.checked;
+    saveStickyState();
+    emit('viewer3d-config-changed', { source: 'viewer3d-tab', reason: 'length-labels-toggled' });
+  });
+  const overlayScale = container.querySelector('#viewer3d-overlay-scale');
+  const overlayScaleValue = container.querySelector('#viewer3d-overlay-scale-value');
+  const applyOverlayScale = () => {
+    if (!overlayScale) return;
+    const multiplier = Math.max(0.2, Number(overlayScale.value || 100) / 100);
+    if (overlayScaleValue) overlayScaleValue.textContent = `${multiplier.toFixed(2)}x`;
+    if (!state.viewer3DConfig.overlay) state.viewer3DConfig.overlay = {};
+    if (!state.viewer3DConfig.overlay.smartScale) state.viewer3DConfig.overlay.smartScale = {};
+    state.viewer3DConfig.overlay.smartScale.multiplier = multiplier;
+    _viewer?.setOverlaySmartScaleMultiplier?.(multiplier);
+    saveStickyState();
+  };
+  overlayScale?.addEventListener('input', applyOverlayScale);
+  const supportScale = container.querySelector('#viewer3d-support-symbol-scale');
+  const supportScaleValue = container.querySelector('#viewer3d-support-symbol-scale-value');
+  const applySupportScale = () => {
+    if (!supportScale) return;
+    const scale = Math.max(0.5, Number(supportScale.value || 200) / 100);
+    if (supportScaleValue) supportScaleValue.textContent = `${scale.toFixed(2)}x`;
+    if (!state.viewer3DConfig.supportGeometry) state.viewer3DConfig.supportGeometry = {};
+    state.viewer3DConfig.supportGeometry.symbolScale = scale;
+    saveStickyState();
+    emit('viewer3d-config-changed', { source: 'viewer3d-tab', reason: 'support-symbol-scale' });
+  };
+  supportScale?.addEventListener('input', applySupportScale);
+
+  const spare1Enabled = container.querySelector('#viewer3d-top-spare1-enabled');
+  const spare1Field = container.querySelector('#viewer3d-top-spare1-field');
+  const spare2Enabled = container.querySelector('#viewer3d-top-spare2-enabled');
+  const spare2Field = container.querySelector('#viewer3d-top-spare2-field');
+  const applySpareConfig = (spareKey) => {
+    if (!state.viewer3DConfig.spareOverlays) {
+      state.viewer3DConfig.spareOverlays = {
+        spare1: { enabled: false, selectedField: '' },
+        spare2: { enabled: false, selectedField: '' },
+        snapToNearest: true,
+        snapToleranceMm: 180,
+      };
+    }
+    if (!state.viewer3DConfig.spareOverlays[spareKey]) {
+      state.viewer3DConfig.spareOverlays[spareKey] = { enabled: false, selectedField: '' };
+    }
+    if (spareKey === 'spare1') {
+      state.viewer3DConfig.spareOverlays.spare1.enabled = !!spare1Enabled?.checked;
+      state.viewer3DConfig.spareOverlays.spare1.selectedField = String(spare1Field?.value || '');
+    } else {
+      state.viewer3DConfig.spareOverlays.spare2.enabled = !!spare2Enabled?.checked;
+      state.viewer3DConfig.spareOverlays.spare2.selectedField = String(spare2Field?.value || '');
+    }
+    saveStickyState();
+    emit('viewer3d-config-changed', { source: 'viewer3d-tab', reason: `${spareKey}-updated` });
+  };
+  spare1Enabled?.addEventListener('change', () => applySpareConfig('spare1'));
+  spare1Field?.addEventListener('change', () => applySpareConfig('spare1'));
+  spare2Enabled?.addEventListener('change', () => applySpareConfig('spare2'));
+  spare2Field?.addEventListener('change', () => applySpareConfig('spare2'));
+
   const boxPad = container.querySelector('#viewer3d-section-boxpad');
-  boxPad?.addEventListener('input', () => {
-    const val = Number(boxPad.value || 0);
+  const boxPadValue = container.querySelector('#viewer3d-section-boxpad-value');
+  _wireAdaptiveCenteredSlider(boxPad, boxPadValue, (val) => {
     _viewer?.setSectionBoxPadding?.(val);
   });
   const planeOffset = container.querySelector('#viewer3d-section-planeoffset');
-  planeOffset?.addEventListener('input', () => {
-    const val = Number(planeOffset.value || 0);
+  const planeOffsetValue = container.querySelector('#viewer3d-section-planeoffset-value');
+  _wireAdaptiveCenteredSlider(planeOffset, planeOffsetValue, (val) => {
     _viewer?.setSectionPlaneOffset?.(val);
+  });
+
+  const sectionMode = container.querySelector('#viewer3d-section-mode');
+  sectionMode?.addEventListener('change', () => {
+    const mode = String(sectionMode.value || 'OFF').toUpperCase();
+    if (mode === 'BOX') {
+      _viewer?.setSectionMode?.('BOX');
+      _updateSectionActiveState(container, 'BOX');
+      return;
+    }
+    if (mode === 'PLANE_UP') {
+      _viewer?.setSectionMode?.('PLANE_UP');
+      _updateSectionActiveState(container, 'PLANE_UP');
+      return;
+    }
+    _viewer?.disableSection?.();
+    _updateSectionActiveState(container, 'OFF');
   });
 }
 
-function _registerShortcuts(cfg) {
+/**
+ * Sync the left-panel settings panel HTML to current config state,
+ * without touching the 3D canvas/geometry at all.
+ * Called after overlay-only config changes to keep checkboxes in sync.
+ */
+function _updateSettingsPanelSection(container) {
+  if (!container) return;
+  const panel = container.querySelector('#viewer3d-settings-panel');
+  if (!panel) return;
+  const cfg = getResolvedViewer3DConfig(state);
+  const addOnDisabledAttr = cfg.disableAllSettings ? 'disabled' : '';
+  const spare1Fields = _spareOverlayRuntime.spare1.fields || [];
+  const spare2Fields = _spareOverlayRuntime.spare2.fields || [];
+  const spare1SelectedField = _resolvePreferredSpareField(cfg.spareOverlays?.spare1?.selectedField, spare1Fields);
+  const spare2SelectedField = _resolvePreferredSpareField(cfg.spareOverlays?.spare2?.selectedField, spare2Fields);
+
+  // Sync checkboxes/selects directly instead of re-rendering the panel HTML,
+  // avoiding any flicker or loss of scroll position.
+  const syncCheck = (id, val) => {
+    const el = panel.querySelector(`#${id}`);
+    if (el) el.checked = !!val;
+  };
+  const syncSelect = (id, val) => {
+    const el = panel.querySelector(`#${id}`);
+    if (el) el.value = String(val || '');
+  };
+
+  syncCheck('viewer3d-top-heatmap-enabled', cfg.heatmap?.enabled);
+  syncSelect('viewer3d-top-heatmap-metric', cfg.heatmap?.metric || 'T1');
+  syncCheck('viewer3d-top-nodes-enabled', cfg.nodes?.enabled);
+  syncCheck('viewer3d-top-line-enabled', cfg.overlay?.annotations?.messageSquareEnabled !== false);
+  syncCheck('viewer3d-top-length-enabled', cfg.lengthLabels?.enabled);
+  syncCheck('viewer3d-top-spare1-enabled', cfg.spareOverlays?.spare1?.enabled);
+  syncCheck('viewer3d-top-spare2-enabled', cfg.spareOverlays?.spare2?.enabled);
+  syncSelect('viewer3d-top-spare1-field', spare1SelectedField);
+  syncSelect('viewer3d-top-spare2-field', spare2SelectedField);
+  const overlayScale = panel.querySelector('#viewer3d-overlay-scale');
+  const overlayScaleValue = panel.querySelector('#viewer3d-overlay-scale-value');
+  if (overlayScale) overlayScale.value = String(Math.round(Number(cfg.overlay?.smartScale?.multiplier || 1) * 100));
+  if (overlayScaleValue) overlayScaleValue.textContent = `${Number(cfg.overlay?.smartScale?.multiplier || 1).toFixed(2)}x`;
+  const supportScale = panel.querySelector('#viewer3d-support-symbol-scale');
+  const supportScaleValue = panel.querySelector('#viewer3d-support-symbol-scale-value');
+  if (supportScale) supportScale.value = String(Math.round(Number(cfg.supportGeometry?.symbolScale || 2) * 100));
+  if (supportScaleValue) supportScaleValue.textContent = `${Number(cfg.supportGeometry?.symbolScale || 2).toFixed(2)}x`;
+}
+
+function _applyOverlayLayersToViewer(cfg, dataSource) {
+  if (!_viewer) return;
+  const messageCircleNodes = Array.isArray(dataSource?.messageCircleNodes) ? dataSource.messageCircleNodes : [];
+  const messageSquareNodes = Array.isArray(dataSource?.messageSquareNodes) ? dataSource.messageSquareNodes : [];
+  _viewer.loadMessageCircleNodes?.(messageCircleNodes);
+  _viewer.loadMessageSquareNodes?.(messageSquareNodes);
+  _viewer.setOverlayLayerVisibility?.('message-circle', !!cfg.nodes?.enabled);
+  _viewer.setOverlayLayerVisibility?.('message-square', cfg.overlay?.annotations?.messageSquareEnabled !== false);
+
+  const spare1Rows = Array.isArray(_spareOverlayRuntime.spare1.rows) ? _spareOverlayRuntime.spare1.rows : [];
+  const spare2Rows = Array.isArray(_spareOverlayRuntime.spare2.rows) ? _spareOverlayRuntime.spare2.rows : [];
+  const spare1Field = _resolvePreferredSpareField(cfg.spareOverlays?.spare1?.selectedField, _spareOverlayRuntime.spare1.fields || []);
+  const spare2Field = _resolvePreferredSpareField(cfg.spareOverlays?.spare2?.selectedField, _spareOverlayRuntime.spare2.fields || []);
+  _viewer.setOverlayLayerData?.('spare1', spare1Rows);
+  _viewer.setOverlayLayerData?.('spare2', spare2Rows);
+  _viewer.setOverlayLayerField?.('spare1', spare1Field);
+  _viewer.setOverlayLayerField?.('spare2', spare2Field);
+  _viewer.setOverlayLayerVisibility?.('spare1', !!cfg.spareOverlays?.spare1?.enabled);
+  _viewer.setOverlayLayerVisibility?.('spare2', !!cfg.spareOverlays?.spare2?.enabled);
+  _viewer.rebuildOverlayLayers?.();
+}
+
+function _registerShortcuts(cfg, container) {
   if (_shortcutHandler) {
     window.removeEventListener('keydown', _shortcutHandler);
     _shortcutHandler = null;
   }
-
-  if (cfg.disableAllSettings || cfg.featureFlags?.shortcuts === false) return;
+  _shortcutContainer = container || _shortcutContainer;
+  const shortcutsEnabled = !(cfg.disableAllSettings || cfg.featureFlags?.shortcuts === false);
 
   _shortcutHandler = (event) => {
+    // Global Escape: always return Viewer nav to Select mode.
+    if (event.code === 'Escape') {
+      event.preventDefault();
+      const modal = _shortcutContainer?.querySelector?.('#viewer3d-config-modal');
+      if (modal && modal.style.display === 'block') {
+        modal.style.display = 'none';
+      }
+      executeViewerAction(_viewer, 'NAV_SELECT');
+      _updateToolbarActiveState(_shortcutContainer, 'NAV_SELECT');
+      return;
+    }
+
     const target = event.target;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+    if (!shortcutsEnabled) return;
+
     const actionId = cfg.shortcuts?.[event.code];
     if (!actionId) return;
     event.preventDefault();
     executeViewerAction(_viewer, actionId);
+    _updateToolbarActiveState(_shortcutContainer, actionId);
   };
   window.addEventListener('keydown', _shortcutHandler);
+}
+
+// Action IDs that represent mutually-exclusive nav modes.
+// Only one of these should be active at a time.
+const _NAV_MODE_ACTIONS = new Set([
+  'NAV_SELECT', 'NAV_ORBIT', 'NAV_PAN',
+  'MEASURE_TOOL', 'VIEW_MARQUEE_ZOOM',
+  'NAV_PLAN_X', 'NAV_ROTATE_Y', 'NAV_ROTATE_Z',
+]);
+
+/**
+ * Set data-active="true" on the matching nav-mode button, false on all others.
+ * Non-nav actions (FitAll, SnapISO, etc.) are left untouched.
+ */
+function _updateToolbarActiveState(container, activeActionId) {
+  if (!_NAV_MODE_ACTIONS.has(activeActionId)) return;
+  container.querySelectorAll('[data-viewer-action]').forEach((btn) => {
+    const id = btn.getAttribute('data-viewer-action');
+    if (_NAV_MODE_ACTIONS.has(id)) {
+      btn.setAttribute('data-active', String(id === activeActionId));
+    }
+  });
+}
+
+/**
+ * Read the viewer's current nav mode and sync toolbar button states.
+ * Called after any operation that might change the mode internally.
+ */
+function _syncToolbarToNavMode(container) {
+  if (!_viewer) return;
+  const mode = _viewer.getNavMode?.();
+  const modeToAction = {
+    orbit:    'NAV_ORBIT',
+    select:   'NAV_SELECT',
+    pan:      'NAV_PAN',
+    measure:  'MEASURE_TOOL',
+    marquee:  'VIEW_MARQUEE_ZOOM',
+    plan:     'NAV_PLAN_X',
+    rotateY:  'NAV_ROTATE_Y',
+    rotateZ:  'NAV_ROTATE_Z',
+  };
+  const actionId = modeToAction[mode];
+  if (actionId) _updateToolbarActiveState(container, actionId);
+}
+
+/** Highlight the active section button (BOX / PLANE_UP / SECTION_DISABLE). */
+function _updateSectionActiveState(container, mode) {
+  const map = { BOX: 'SECTION_BOX', PLANE_UP: 'SECTION_PLANE_UP', OFF: 'SECTION_DISABLE' };
+  const activeId = map[mode] || null;
+  container.querySelectorAll('[data-viewer-action]').forEach((btn) => {
+    const id = btn.getAttribute('data-viewer-action');
+    if (id === 'SECTION_BOX' || id === 'SECTION_PLANE_UP' || id === 'SECTION_DISABLE') {
+      btn.setAttribute('data-active', String(id === activeId));
+    }
+  });
+}
+
+/** Keep the left settings Clip Plane selector in sync with the active section mode. */
+function _syncSectionModeControl(container, mode) {
+  const select = container.querySelector('#viewer3d-section-mode');
+  if (!select) return;
+  const normalized = mode === 'BOX' || mode === 'PLANE_UP' ? mode : 'OFF';
+  if (select.value !== normalized) select.value = normalized;
+}
+
+/** Highlight VIEW_TOGGLE_PROJECTION when perspective is active. */
+function _updateProjectionActiveState(container, mode) {
+  container.querySelectorAll('[data-viewer-action="VIEW_TOGGLE_PROJECTION"]').forEach((btn) => {
+    btn.setAttribute('data-active', String(mode === 'perspective'));
+  });
+}
+
+/**
+ * Copy a measurement distance (mm) to the clipboard with a brief toast.
+ */
+function _copyMeasurementToClipboard(distance) {
+  if (distance == null || !Number.isFinite(Number(distance))) return;
+  const text = `${Number(distance).toFixed(2)} mm`;
+  navigator.clipboard?.writeText(text).catch(() => {});
+  // Brief visual toast — reuse any existing toast element or console
+  console.info(`[Measure] Copied to clipboard: ${text}`);
+}
+
+function _setStatusMessage(container, message) {
+  const el = container?.querySelector?.('.status-message');
+  if (!el) return;
+  el.textContent = String(message || '');
+}
+
+function _formatMeasurementStatus(payload) {
+  const distance = Number(payload?.distance || 0);
+  const dx = Number(payload?.dx ?? payload?.absDx ?? 0);
+  const dy = Number(payload?.dy ?? payload?.absDy ?? 0);
+  const dz = Number(payload?.dz ?? payload?.absDz ?? 0);
+  return `Measure: ${distance.toFixed(1)} mm | dx ${dx.toFixed(1)} dy ${dy.toFixed(1)} dz ${dz.toFixed(1)} mm`;
+}
+
+function _wireAdaptiveCenteredSlider(slider, readout, onInput) {
+  if (!slider) return;
+  const step = Math.max(1, Number(slider.step || 1));
+  const initialMin = Number(slider.min || -1000);
+  const initialMax = Number(slider.max || 1000);
+  let min = initialMin;
+  let max = initialMax;
+  const center = 0;
+  const hardAbsLimit = 250000;
+  let edgeLock = '';
+
+  const updateReadout = (v) => {
+    if (!readout) return;
+    const value = Number(v || 0);
+    const abs = Math.abs(value);
+    const compact = abs >= 100000
+      ? value.toExponential(2)
+      : new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value);
+    readout.textContent = compact;
+    readout.title = value.toFixed(0);
+  };
+
+  const expandRangeIfNeeded = (v) => {
+    const edgeThreshold = Math.max(step * 1.5, (max - min) * 0.015);
+    let direction = '';
+    if (v <= min + edgeThreshold) direction = 'min';
+    if (v >= max - edgeThreshold) direction = 'max';
+    if (!direction) {
+      edgeLock = '';
+      return;
+    }
+    if (edgeLock === direction) return;
+    edgeLock = direction;
+
+    const span = Math.max(step * 10, max - min);
+    const growBy = Math.max(step * 10, span * 0.35);
+    if (direction === 'min') min = Math.max(-hardAbsLimit, Math.round(min - growBy));
+    if (direction === 'max') max = Math.min(hardAbsLimit, Math.round(max + growBy));
+    slider.min = String(min);
+    slider.max = String(max);
+  };
+
+  const applyValue = () => {
+    const raw = Number(slider.value || 0);
+    const v = Math.max(min, Math.min(max, raw));
+    if (v !== raw) slider.value = String(v);
+    expandRangeIfNeeded(v);
+    updateReadout(v);
+    if (typeof onInput === 'function') onInput(v);
+  };
+
+  slider.min = String(initialMin);
+  slider.max = String(initialMax);
+  slider.value = String(center);
+  updateReadout(center);
+  if (typeof onInput === 'function') onInput(center);
+  slider.addEventListener('input', applyValue);
 }
 
 function _wireSidePanelTabs(container) {
@@ -391,19 +1090,53 @@ function _wireSidePanelTabs(container) {
 }
 
 function _renderToolbar(cfg, actions) {
-  if (cfg.disableAllSettings) return '';
-  if (cfg.featureFlags?.toolbar === false || cfg.toolbar?.enabled === false) return '';
-
   const style = `style="opacity:${Number(cfg.toolbar?.opacity ?? 1)}"`;
-  return `
-    <div class="geo-toolbar viewer3d-toolbar" ${style}>
-      ${actions.map((actionId) => {
-        const tooltip = cfg.actions?.[actionId]?.tooltip || ACTION_LABELS[actionId] || actionId;
-        const title = `title="${_esc(tooltip)}"`;
-        return `<button class="btn-icon viewer3d-icon-btn" data-viewer-action="${actionId}" aria-label="${_esc(tooltip)}" ${title}>${ACTION_ICONS[actionId] || _esc(ACTION_LABELS[actionId] || actionId)}</button>`;
-      }).join('')}
-    </div>
-  `;
+
+  if (cfg.disableAllSettings || cfg.featureFlags?.toolbar === false || cfg.toolbar?.enabled === false) {
+    return `<div class="viewer3d-ribbon-actions viewer3d-ribbon-actions-disabled" ${style}></div>`;
+  }
+
+  const groups = [
+    { label: 'Navigate', actions: ['NAV_SELECT', 'NAV_ORBIT', 'NAV_PAN', 'MEASURE_TOOL', 'VIEW_MARQUEE_ZOOM'] },
+    { label: 'Rotate', actions: ['NAV_PLAN_X', 'NAV_ROTATE_Y', 'NAV_ROTATE_Z'] },
+    { label: 'Snaps', actions: ['SNAP_ISO_NW', 'SNAP_ISO_NE', 'SNAP_ISO_SW', 'SNAP_ISO_SE'] },
+    { label: 'View', actions: ['VIEW_FIT_ALL', 'VIEW_FIT_SELECTION', 'VIEW_TOGGLE_PROJECTION'] },
+    { label: 'Section', actions: ['SECTION_BOX', 'SECTION_PLANE_UP', 'SECTION_DISABLE'] },
+  ];
+
+  const mappedActions = new Set(groups.flatMap((group) => group.actions));
+  const unmapped = actions.filter((actionId) => !mappedActions.has(actionId));
+  if (unmapped.length > 0) {
+    groups.push({ label: 'More', actions: unmapped });
+  }
+
+  let html = `<div class="viewer3d-ribbon-actions" ${style}>`;
+
+  for (const group of groups) {
+    const groupItems = group.actions.filter((actionId) => actions.includes(actionId));
+    if (groupItems.length === 0) continue;
+
+    html += `
+      <div class="ribbon-action-group">
+        <div class="ribbon-group-label">${_esc(group.label)}</div>
+        <div class="ribbon-group-buttons">
+          ${groupItems.map((actionId) => {
+            const label = ACTION_LABELS[actionId] || actionId;
+            const tooltip = cfg.actions?.[actionId]?.tooltip || label;
+            const title = `title="${_esc(tooltip)}"`;
+            const icon = ACTION_ICONS[actionId];
+            const glyph = icon
+              ? `<span class="viewer3d-icon-glyph">${icon}</span>`
+              : `<span class="viewer3d-icon-fallback">${_esc(label)}</span>`;
+            return `<button class="btn-icon viewer3d-icon-btn" data-viewer-action="${actionId}" aria-label="${_esc(tooltip)}" ${title}>${glyph}<span class="viewer3d-icon-label">${_esc(label)}</span></button>`;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  html += '</div>';
+  return html;
 }
 
 function _updateComponentPanel(container, cfg) {
@@ -437,8 +1170,7 @@ function _renderComponentPanel(cfg) {
   `;
 }
 
-function _renderSummaryLegend(cfg, summary, dataSource, components) {
-  const legendMode = cfg.legend?.mode || 'none';
+function _renderSummaryPanel(cfg, summary, dataSource, components) {
   const heat = cfg.heatmap || {};
   const typeCounts = summary;
   const parsed = dataSource?.parsed || null;
@@ -450,13 +1182,10 @@ function _renderSummaryLegend(cfg, summary, dataSource, components) {
 
   return `
     <div class="geo-legend-panel">
-      <div class="legend-title">Legend / Heatmap</div>
-      <div class="legend-row"><span>Mode</span><span class="mono" style="margin-left:auto;">${_esc(String(legendMode))}</span></div>
+      <div class="legend-title">Heatmap</div>
       <div class="legend-row"><span>Heatmap</span><span class="mono" style="margin-left:auto;">${heat.enabled ? 'ON' : 'OFF'}</span></div>
       <div class="legend-row"><span>Metric</span><span class="mono" style="margin-left:auto;">${_esc(String(heat.metric || 'T1'))}</span></div>
       <div class="legend-row"><span>Steps</span><span class="mono" style="margin-left:auto;">${Number(heat.bucketCount || 5)}</span></div>
-      <div class="legend-row"><span>Canvas Labels</span><span class="mono" style="margin-left:auto;">${cfg.legend?.canvasLabels?.enabled === false ? 'off' : 'on'}</span></div>
-      <div class="tab-note" style="margin:4px 0 10px 0;">Adjust via header controls. Selecting a legend mode shows labels in 3D.</div>
 
       <h4 class="sub-heading" style="margin-top:1rem;">Component Mix</h4>
       ${typeCounts.length
@@ -611,24 +1340,107 @@ function _buildSupportFallbackComponents(parsed) {
 }
 
 function _buildDirectPcfData(text, fileName) {
-  const parsedPcf = parsePcfText(text, null);
-  const model = normalizePcfModel(parsedPcf, null);
-  const messageCircleNodes = model.components
-    .filter(c => c.type === 'MESSAGE-CIRCLE' && c.circleCoord && c.circleText)
-    .map(c => ({ pos: c.circleCoord, text: c.circleText }));
-  const messageSquareNodes = model.components
-    .filter(c => c.type === 'MESSAGE-SQUARE' && c.squarePos && c.squareText)
-    .map(c => ({ pos: c.squarePos, text: c.squareText }));
+  // Route through PCFX canonical layer for a clean, normalised representation.
+  // pcfxDocumentFromPcfText returns the document object directly (not { doc }).
+  const doc = pcfxDocumentFromPcfText(text, fileName, {}, null);
+  const canonicalItems = (doc && doc.canonical && doc.canonical.items) ? doc.canonical.items : [];
+
+  const messageCircleNodes = canonicalItems
+    .filter(c => String(c.type || '').toUpperCase() === 'MESSAGE-CIRCLE' && c.extras?.circleCoord && c.extras?.circleText)
+    .map(c => ({ pos: c.extras.circleCoord, text: c.extras.circleText }));
+  const messageSquareNodes = canonicalItems
+    .filter(c => String(c.type || '').toUpperCase() === 'MESSAGE-SQUARE' && c.extras?.squarePos && c.extras?.squareText)
+    .map(c => ({ pos: c.extras.squarePos, text: c.extras.squareText }));
+
+  // Fall back to raw model for MESSAGE node data if extras not populated
+  if (!messageCircleNodes.length || !messageSquareNodes.length) {
+    try {
+      const parsedPcf = parsePcfText(text, null);
+      const model = normalizePcfModel(parsedPcf, null);
+      if (!messageCircleNodes.length) {
+        messageCircleNodes.push(...model.components
+          .filter(c => c.type === 'MESSAGE-CIRCLE' && c.circleCoord && c.circleText)
+          .map(c => ({ pos: c.circleCoord, text: c.circleText })));
+      }
+      if (!messageSquareNodes.length) {
+        messageSquareNodes.push(...model.components
+          .filter(c => c.type === 'MESSAGE-SQUARE' && c.squarePos && c.squareText)
+          .map(c => ({ pos: c.squarePos, text: c.squareText })));
+      }
+    } catch (_) { /* ignore */ }
+  }
+
+  const components = canonicalItems
+    .filter(c => {
+      const t = String(c.type || '').toUpperCase();
+      return t !== 'MESSAGE-CIRCLE' && t !== 'MESSAGE-SQUARE';
+    })
+    .map(item => viewerComponentFromCanonicalItem(item))
+    .filter(Boolean);
+
   return {
     kind: 'direct-pcf',
     fileName,
     parsed: null,
-    components: model.components
-      .filter(c => c.type !== 'MESSAGE-CIRCLE' && c.type !== 'MESSAGE-SQUARE')
-      .map(_mapDirectPcfComponent).filter(Boolean),
+    components,
     messageCircleNodes,
     messageSquareNodes,
   };
+}
+
+function _isLocalhostHost() {
+  const host = String(window.location.hostname || '').toLowerCase();
+  return host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+}
+
+/**
+ * Load seeded mock payloads (JSON) from app static assets once.
+ * Fallback: raises an explicit error if seed file is unavailable.
+ */
+async function _fetchMockSeedPayload() {
+  if (_mockSeedPayload) return _mockSeedPayload;
+  const response = await fetch('./opt/mock-pcf-data.json', { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`Mock seed request failed (HTTP ${response.status}).`);
+  }
+  const payload = await response.json();
+  _mockSeedPayload = payload && typeof payload === 'object' ? payload : {};
+  return _mockSeedPayload;
+}
+
+/**
+ * Resolve mock payload for a given key from config, and if missing,
+ * hydrate from seeded JSON file, persist to sticky config, then return it.
+ */
+async function _resolveMockPayload(mockKey) {
+  const mockData = state.viewer3DConfig?.mockData || {};
+  const current = mockData[mockKey] && typeof mockData[mockKey] === 'object' ? mockData[mockKey] : {};
+  const shouldRefreshLegacyMock1 =
+    mockKey === 'mock1' &&
+    String(current.fileName || '').trim() === 'ImportPcfDemo_20Rows.pcf';
+  if (String(current.pcfText || '').trim() && !shouldRefreshLegacyMock1) return current;
+
+  const seeded = await _fetchMockSeedPayload();
+  const seededEntry = seeded[mockKey] && typeof seeded[mockKey] === 'object' ? seeded[mockKey] : null;
+  if (!seededEntry || !String(seededEntry.pcfText || '').trim()) {
+    throw new Error(`No seeded mock payload found for ${mockKey}.`);
+  }
+
+  if (!state.viewer3DConfig.mockData || typeof state.viewer3DConfig.mockData !== 'object') {
+    state.viewer3DConfig.mockData = {};
+  }
+  state.viewer3DConfig.mockData[mockKey] = {
+    ...(state.viewer3DConfig.mockData[mockKey] || {}),
+    label: String(seededEntry.label || current.label || mockKey),
+    fileName: String(seededEntry.fileName || current.fileName || `${mockKey}.pcf`),
+    pcfText: String(seededEntry.pcfText || ''),
+  };
+  if (typeof state.viewer3DConfig.mockData.enabledOnLocalhostOnly !== 'boolean') {
+    state.viewer3DConfig.mockData.enabledOnLocalhostOnly = true;
+  }
+  saveStickyState();
+
+  return state.viewer3DConfig.mockData[mockKey];
 }
 
 function _mapDirectPcfComponent(comp) {
@@ -700,17 +1512,50 @@ function _resolveBendCentrePoint(seg, p1, p2, nodePos) {
   const declaredCentre = _pt(seg.CENTRE_POINT);
   if (declaredCentre) return declaredCentre;
   const controlPoint = _pt(nodePos.get(seg.CONTROL_NODE));
-  if (!p1 || !p2 || !controlPoint) return _midPoint(p1, p2);
+  if (controlPoint) return controlPoint;
 
-  const circumcentre = _circumcentreFromThreePoints(p1, controlPoint, p2);
-  if (circumcentre) {
-    return {
-      ...circumcentre,
-      bore: Number(p1.bore || p2.bore || controlPoint.bore || 0),
-    };
+  // §10.5.4: CP is the corner intersection — NOT the midpoint.
+  // Midpoint gives a 180° angle → degenerate → renders as a cylinder.
+  // Corner CP: try all 6 combinations of (EP1 or EP2) per coordinate axis;
+  // the valid one has dist(CP,EP1) = dist(CP,EP2) and a non-zero radius.
+  return _bendCornerCP(p1, p2) || null;
+}
+
+/**
+ * Compute the 90° bend corner-intersection CP from two endpoints.
+ * Per §10.5.4: CP shares one axis-coord with EP1 and the complementary
+ * axis-coord with EP2, so dist(CP,EP1) = dist(CP,EP2) = bend_radius.
+ * @param {{x,y,z}} p1
+ * @param {{x,y,z}} p2
+ * @returns {{x,y,z,bore}|null}
+ */
+function _bendCornerCP(p1, p2) {
+  if (!p1 || !p2) return null;
+  const bore = p1.bore || p2.bore || 0;
+  const dist3 = (a, b) => Math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2 + (a.z-b.z)**2);
+
+  // 6 possible corner-intersection candidates (one axis from EP1, others from EP2)
+  const candidates = [
+    { x: p1.x, y: p2.y, z: p1.z },  // CP.x=EP1.x, CP.z=EP1.z, CP.y=EP2.y  (XZ-plane, Y turns)
+    { x: p2.x, y: p1.y, z: p1.z },  // CP.y=EP1.y, CP.z=EP1.z, CP.x=EP2.x  (YZ-plane, X turns)
+    { x: p1.x, y: p1.y, z: p2.z },  // CP.x=EP1.x, CP.y=EP1.y, CP.z=EP2.z  (XY-plane, Z turns)
+    { x: p2.x, y: p1.y, z: p2.z },
+    { x: p1.x, y: p2.y, z: p2.z },
+    { x: p2.x, y: p2.y, z: p1.z },
+  ];
+
+  let best = null;
+  let bestErr = Infinity;
+  for (const cp of candidates) {
+    const d1 = dist3(cp, p1);
+    const d2 = dist3(cp, p2);
+    if (d1 < 0.1 || d2 < 0.1) continue;   // endpoint ON corner → degenerate
+    const err = Math.abs(d1 - d2);
+    if (err < bestErr) { bestErr = err; best = cp; }
   }
 
-  return _midPoint(p1, p2);
+  if (!best || bestErr > 1.0) return null;  // no valid corner found (not a 90° bend)
+  return { x: best.x, y: best.y, z: best.z, bore };
 }
 
 function _resolveNodePositions(csvRows) {
@@ -841,6 +1686,95 @@ function _summariseComponents(components) {
     .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
 }
 
+function _resolvePreferredSpareField(selectedField, fields) {
+  const list = Array.isArray(fields) ? fields.map((f) => String(f || '').trim()).filter(Boolean) : [];
+  if (!list.length) return '';
+  const selected = String(selectedField || '').trim();
+  if (selected && list.includes(selected)) return selected;
+  return list[0];
+}
+
+/**
+ * Parse Spare overlay CSV input into normalized rows:
+ * - required coordinate columns: x,y,z (case-insensitive)
+ * - all other columns exposed as field dropdown candidates
+ */
+function _parseSpareCsvData(text) {
+  const table = _parseCsvTable(text);
+  if (!table.length) throw new Error('CSV is empty.');
+  const headers = table[0].map((h) => String(h || '').trim());
+  const normalizedHeaders = headers.map((h) => h.toLowerCase());
+  const xIndex = normalizedHeaders.indexOf('x');
+  const yIndex = normalizedHeaders.indexOf('y');
+  const zIndex = normalizedHeaders.indexOf('z');
+  if (xIndex < 0 || yIndex < 0 || zIndex < 0) {
+    throw new Error('CSV must include coordinate headers: x,y,z (case-insensitive).');
+  }
+  const dataFields = headers
+    .map((header, index) => ({ header, index }))
+    .filter((entry) => entry.header && entry.index !== xIndex && entry.index !== yIndex && entry.index !== zIndex)
+    .map((entry) => entry.header);
+  const rows = [];
+  for (let rowIndex = 1; rowIndex < table.length; rowIndex += 1) {
+    const row = table[rowIndex] || [];
+    const rawX = String(row[xIndex] ?? '').trim();
+    const rawY = String(row[yIndex] ?? '').trim();
+    const rawZ = String(row[zIndex] ?? '').trim();
+    if (!rawX && !rawY && !rawZ) continue;
+    const x = Number(rawX);
+    const y = Number(rawY);
+    const z = Number(rawZ);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+    const fields = {};
+    for (const fieldName of dataFields) {
+      const idx = headers.indexOf(fieldName);
+      if (idx < 0) continue;
+      fields[fieldName] = String(row[idx] ?? '').trim();
+    }
+    rows.push({ x, y, z, fields, styleKey: 'spare' });
+  }
+  if (!rows.length) throw new Error('No valid coordinate rows found in CSV.');
+  return { rows, fields: dataFields };
+}
+
+function _parseCsvTable(text) {
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let inQuotes = false;
+  const src = String(text || '');
+  for (let i = 0; i < src.length; i += 1) {
+    const ch = src[i];
+    const next = src[i + 1];
+    if (ch === '"') {
+      if (inQuotes && next === '"') {
+        cell += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (!inQuotes && ch === ',') {
+      row.push(cell);
+      cell = '';
+      continue;
+    }
+    if (!inQuotes && (ch === '\n' || ch === '\r')) {
+      if (ch === '\r' && next === '\n') i += 1;
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+      continue;
+    }
+    cell += ch;
+  }
+  row.push(cell);
+  if (row.length > 1 || row[0] !== '' || rows.length === 0) rows.push(row);
+  return rows.filter((r) => r.some((value) => String(value || '').trim() !== ''));
+}
+
 function _renderSummary(summary, parsed, components) {
   const nodes = Object.keys(parsed?.nodes || {}).length;
   const elements = parsed?.elements?.length || 0;
@@ -878,3 +1812,8 @@ function _esc(s) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 }
+
+function _escAttr(s) {
+  return _esc(s).replace(/"/g, '&quot;');
+}
+

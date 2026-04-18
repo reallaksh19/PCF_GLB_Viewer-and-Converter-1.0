@@ -30,12 +30,14 @@ export function buildPipeMesh(comp) {
   );
 
   mesh.name = comp.id;
+  const attrs = comp.attributes || {};
   mesh.userData = {
     pcfType: comp.type,
     pcfId: comp.id,
-    refNo: comp.refNo || '',
+    // COMPONENT-ATTRIBUTE97 is the standard PCF reference-number field
+    refNo: comp.refNo || attrs['COMPONENT-ATTRIBUTE97'] || '',
     bore: comp.bore || null,
-    ...(comp.attributes || {})
+    ...attrs,
   };
 
   return mesh;

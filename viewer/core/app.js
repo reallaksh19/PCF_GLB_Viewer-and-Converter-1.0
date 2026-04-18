@@ -1,6 +1,5 @@
 import { loadStickyState } from './state.js';
 import { state } from './state.js';
-import { renderGeometry } from '../tabs/geometry-tab.js';
 import { renderViewer3D } from '../tabs/viewer3d-tab.js';
 import { renderAdvancedGlbViewerPanel } from '../js/pcf2glb/ui/AdvancedGlbViewerPanel.js';
 import { renderPcfxConverterTab } from '../tabs/pcfx-converter-tab.js';
@@ -8,10 +7,11 @@ import { emit } from './event-bus.js';
 
 const TAB_CONFIG_URL = './opt/tab-visibility.json';
 
+const IS_DEV = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
 const TABS = [
-  { id: 'geometry',  label: 'Geometry',    render: renderGeometry },
   { id: 'viewer3d',  label: '3D Viewer',   render: renderViewer3D },
-  { id: 'adv-glb',   label: 'Advanced GLB Viewer', render: renderAdvancedGlbViewerPanel },
+  ...(IS_DEV ? [{ id: 'adv-glb', label: 'Advanced GLB Viewer', render: renderAdvancedGlbViewerPanel }] : []),
   { id: 'pcfx-converter', label: 'PCF<->PCFX<->GLB', render: renderPcfxConverterTab },
 ];
 
@@ -77,7 +77,7 @@ function _configFlagEnabled(value) {
 }
 
 function _resolveInitialTabId() {
-  const requested = String(state.activeTab || 'geometry');
+  const requested = String(state.activeTab || 'viewer3d');
   const match = _visibleTabs.find((tab) => tab.id === requested);
-  return match?.id || _visibleTabs[0]?.id || 'geometry';
+  return match?.id || _visibleTabs[0]?.id || 'viewer3d';
 }

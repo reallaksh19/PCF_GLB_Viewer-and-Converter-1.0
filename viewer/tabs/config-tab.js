@@ -5,13 +5,35 @@
 import { state, saveStickyState } from '../core/state.js';
 import { emit, on } from '../core/event-bus.js';
 import { DEFAULT_VIEWER3D_CONFIG, VIEWER_ACTION_IDS } from '../viewer-3d-defaults.js';
-import { getPcfMapping, savePcfMapping, getCaesarMatchAttribute, saveCaesarMatchAttribute } from '../core/settings.js';
+import { getPcfMapping, savePcfMapping, getCaesarMatchAttribute, saveCaesarMatchAttribute, getSupportKindMap, saveSupportKindMap } from '../core/settings.js';
 import { updateViewer3DConfig } from '../viewer-3d-config.js';
 
 let _listenersRegistered = false;
 
 function clone(v) {
   return JSON.parse(JSON.stringify(v));
+}
+
+function _normalizeMockData(rawMockData) {
+  const defaults = DEFAULT_VIEWER3D_CONFIG.mockData || {};
+  const source = rawMockData && typeof rawMockData === 'object' ? rawMockData : {};
+  const mock1 = source.mock1 && typeof source.mock1 === 'object' ? source.mock1 : {};
+  const mock2 = source.mock2 && typeof source.mock2 === 'object' ? source.mock2 : {};
+  const defaultMock1 = defaults.mock1 || {};
+  const defaultMock2 = defaults.mock2 || {};
+  return {
+    enabledOnLocalhostOnly: source.enabledOnLocalhostOnly !== false,
+    mock1: {
+      label: String(mock1.label || defaultMock1.label || 'Mock 1'),
+      fileName: String(mock1.fileName || defaultMock1.fileName || ''),
+      pcfText: String(mock1.pcfText || ''),
+    },
+    mock2: {
+      label: String(mock2.label || defaultMock2.label || 'Mock 2'),
+      fileName: String(mock2.fileName || defaultMock2.fileName || ''),
+      pcfText: String(mock2.pcfText || ''),
+    },
+  };
 }
 
 export function renderConfig(container) {
@@ -24,6 +46,7 @@ export function renderConfig(container) {
   }
 
   const cfg = state.viewer3DConfig || clone(DEFAULT_VIEWER3D_CONFIG);
+  const mockData = _normalizeMockData(cfg.mockData);
 
   const mapping = getPcfMapping();
   let mappingHtml = '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 1rem;">';
@@ -65,6 +88,66 @@ export function renderConfig(container) {
       <p class="tab-note" style="margin-top:8px;">Support rendering type (REST / GUIDE / ANCHOR) is inferred from <code>SUPPORT-DIRECTION</code>, SKEY, or the support name text. REST = vertical downward arrow, GUIDE = two lateral arrows, ANCHOR = plate symbol.</p>
 
       <hr style="margin: 2rem 0;">
+      <h3 class="section-heading">Support Kind Map (SKEY → Kind)</h3>
+      <p class="tab-note">
+        Map PCF <code>SKEY</code> catalog codes to a support kind.
+        Checked after explicit <code>SUPPORT-KIND</code> but before direction / name heuristics.
+        Kind must be one of: <strong>REST</strong>, <strong>GUIDE</strong>, <strong>ANCHOR</strong>, <strong>SPRING</strong>.
+      </p>
+      <table id="support-kind-map-table" style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding:4px 8px;border-bottom:1px solid #334155;">SKEY Value</th>
+            <th style="text-align:left;padding:4px 8px;border-bottom:1px solid #334155;">Kind</th>
+            <th style="padding:4px 8px;border-bottom:1px solid #334155;"></th>
+          </tr>
+        </thead>
+        <tbody id="support-kind-map-rows">
+          ${_renderSupportKindRows(getSupportKindMap())}
+        </tbody>
+      </table>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <button id="skm-add-row" class="btn-secondary">+ Add Row</button>
+        <button id="skm-save" class="btn-primary">Save Support Kind Map</button>
+        <button id="skm-reset" class="btn-secondary">Reset to Defaults</button>
+        <span id="skm-status" style="font-size:12px;color:#22c55e;display:none;">Saved ✓</span>
+      </div>
+
+      <hr style="margin: 2rem 0;">
+      <h3 class="section-heading">Localhost Mock Data (3D Viewer)</h3>
+      <p class="tab-note">Mock buttons are shown only on localhost. The payload below is stored in viewer3DConfig as JSON and loaded when clicking Mock 1 / Mock 2.</p>
+      <label style="display:block;margin-bottom:10px;">
+        <input type="checkbox" id="cfg-mock-local-only" ${mockData.enabledOnLocalhostOnly ? 'checked' : ''}>
+        Enable mock buttons on localhost
+      </label>
+      <div class="cfg-grid" style="grid-template-columns: 1fr 1fr; gap: 10px;">
+        <label>Mock 1 Label
+          <input type="text" id="cfg-mock1-label" value="${_esc(mockData.mock1.label)}">
+        </label>
+        <label>Mock 1 File Name
+          <input type="text" id="cfg-mock1-file" value="${_esc(mockData.mock1.fileName)}">
+        </label>
+      </div>
+      <label style="display:block;margin-top:8px;">Mock 1 PCF Text (JSON string payload)
+        <textarea id="cfg-mock1-pcf" class="mono" style="width:100%;min-height:90px;">${_esc(mockData.mock1.pcfText)}</textarea>
+      </label>
+
+      <div class="cfg-grid" style="grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px;">
+        <label>Mock 2 Label
+          <input type="text" id="cfg-mock2-label" value="${_esc(mockData.mock2.label)}">
+        </label>
+        <label>Mock 2 File Name
+          <input type="text" id="cfg-mock2-file" value="${_esc(mockData.mock2.fileName)}">
+        </label>
+      </div>
+      <label style="display:block;margin-top:8px;">Mock 2 PCF Text (JSON string payload)
+        <textarea id="cfg-mock2-pcf" class="mono" style="width:100%;min-height:90px;">${_esc(mockData.mock2.pcfText)}</textarea>
+      </label>
+      <div style="margin-top:8px;">
+        <button id="cfg-load-mock-seeds" class="btn-secondary">Load Seed Mock Data from /opt/mock-pcf-data.json</button>
+      </div>
+
+      <hr style="margin: 2rem 0;">
       <h3 class="section-heading">3D Viewer Config (Legacy)</h3>
       <p class="tab-note">Dedicated top-level settings for the 3D Viewer tab only.</p>
 
@@ -91,6 +174,15 @@ export function renderConfig(container) {
         </label>
         <label>Heatmap Buckets
           <input id="cfg-heatmap-buckets" type="number" min="2" max="12" value="${Number(cfg.heatmap?.bucketCount || 5)}">
+        </label>
+        <label>Overlay Sensitivity
+          <input
+            id="cfg-overlay-scroll-sensitivity"
+            type="number"
+            min="0.05"
+            max="2.5"
+            step="0.05"
+            value="${Number(cfg.overlay?.smartScale?.scrollSensitivity ?? 0.2)}">
         </label>
       </div>
 
@@ -154,6 +246,52 @@ export function renderConfig(container) {
       emit('viewer3d-config-changed', { source: 'config-tab', reason: 'import-json' });
     } catch (e) {
       alert(`Invalid JSON: ${e.message}`);
+    }
+  });
+
+  container.querySelector('#cfg-load-mock-seeds')?.addEventListener('click', async () => {
+    try {
+      const response = await fetch('./opt/mock-pcf-data.json', { cache: 'no-store' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      const mock1 = payload?.mock1 || {};
+      const mock2 = payload?.mock2 || {};
+      if (container.querySelector('#cfg-mock1-label')) container.querySelector('#cfg-mock1-label').value = String(mock1.label || 'Mock 1');
+      if (container.querySelector('#cfg-mock1-file')) container.querySelector('#cfg-mock1-file').value = String(mock1.fileName || '');
+      if (container.querySelector('#cfg-mock1-pcf')) container.querySelector('#cfg-mock1-pcf').value = String(mock1.pcfText || '');
+      if (container.querySelector('#cfg-mock2-label')) container.querySelector('#cfg-mock2-label').value = String(mock2.label || 'Mock 2');
+      if (container.querySelector('#cfg-mock2-file')) container.querySelector('#cfg-mock2-file').value = String(mock2.fileName || '');
+      if (container.querySelector('#cfg-mock2-pcf')) container.querySelector('#cfg-mock2-pcf').value = String(mock2.pcfText || '');
+    } catch (error) {
+      alert(`Failed to load seeded mock data: ${String(error?.message || error)}`);
+    }
+  });
+
+  // ── Support Kind Map handlers ─────────────────────────────────────
+  container.querySelector('#skm-add-row')?.addEventListener('click', () => {
+    const tbody = container.querySelector('#support-kind-map-rows');
+    if (tbody) tbody.insertAdjacentHTML('beforeend', _renderSupportKindRow('', 'REST'));
+  });
+
+  container.querySelector('#skm-save')?.addEventListener('click', () => {
+    const map = _readSupportKindMap(container);
+    saveSupportKindMap(map);
+    const status = container.querySelector('#skm-status');
+    if (status) {
+      status.style.display = 'inline';
+      setTimeout(() => { status.style.display = 'none'; }, 2000);
+    }
+  });
+
+  container.querySelector('#skm-reset')?.addEventListener('click', () => {
+    saveSupportKindMap({});           // clear → getSupportKindMap returns defaults
+    const tbody = container.querySelector('#support-kind-map-rows');
+    if (tbody) tbody.innerHTML = _renderSupportKindRows(getSupportKindMap());
+  });
+
+  container.querySelector('#support-kind-map-rows')?.addEventListener('click', (e) => {
+    if (e.target.classList.contains('skm-remove-row')) {
+      e.target.closest('tr')?.remove();
     }
   });
 
@@ -228,6 +366,11 @@ function _applyForm(container) {
       metric: container.querySelector('#cfg-heatmap-metric')?.value || 'T1',
       bucketCount: Number(container.querySelector('#cfg-heatmap-buckets')?.value || 5),
     },
+    overlay: {
+      smartScale: {
+        scrollSensitivity: Number(container.querySelector('#cfg-overlay-scroll-sensitivity')?.value || 0.2),
+      },
+    },
     componentPanel: {
       enabled: !!container.querySelector('#cfg-cp-enabled')?.checked,
       showRawAttributes: !!container.querySelector('#cfg-cp-raw')?.checked,
@@ -236,6 +379,19 @@ function _applyForm(container) {
       showProcessSection: !!container.querySelector('#cfg-cp-process')?.checked,
       showSupportSection: !!container.querySelector('#cfg-cp-support')?.checked,
     },
+    mockData: {
+      enabledOnLocalhostOnly: !!container.querySelector('#cfg-mock-local-only')?.checked,
+      mock1: {
+        label: String(container.querySelector('#cfg-mock1-label')?.value || 'Mock 1'),
+        fileName: String(container.querySelector('#cfg-mock1-file')?.value || ''),
+        pcfText: String(container.querySelector('#cfg-mock1-pcf')?.value || ''),
+      },
+      mock2: {
+        label: String(container.querySelector('#cfg-mock2-label')?.value || 'Mock 2'),
+        fileName: String(container.querySelector('#cfg-mock2-file')?.value || ''),
+        pcfText: String(container.querySelector('#cfg-mock2-pcf')?.value || ''),
+      },
+    },
     actions: actionPatch,
   };
 
@@ -243,6 +399,55 @@ function _applyForm(container) {
   saveStickyState();
   emit('viewer3d-config-changed', { source: 'config-tab', reason: 'apply' });
 }
+
+// ─── Support Kind Map helpers ─────────────────────────────────────────────────
+
+const _SKM_KINDS = ['REST', 'GUIDE', 'ANCHOR', 'SPRING'];
+
+function _kindOptions(selected) {
+  return _SKM_KINDS.map(k =>
+    `<option value="${k}" ${k === selected ? 'selected' : ''}>${k}</option>`
+  ).join('');
+}
+
+function _renderSupportKindRow(skey, kind) {
+  return `
+    <tr class="skm-row">
+      <td style="padding:4px 8px;">
+        <input type="text" class="skm-skey" value="${_esc(skey)}"
+          placeholder="e.g. CA150"
+          style="width:100%;box-sizing:border-box;font-family:monospace;"/>
+      </td>
+      <td style="padding:4px 8px;">
+        <select class="skm-kind" style="width:100%;">
+          ${_kindOptions((kind || 'REST').toUpperCase())}
+        </select>
+      </td>
+      <td style="padding:4px 8px;text-align:center;">
+        <button class="skm-remove-row btn-secondary"
+          style="padding:2px 8px;font-size:12px;cursor:pointer;"
+          title="Remove row">×</button>
+      </td>
+    </tr>`;
+}
+
+function _renderSupportKindRows(map) {
+  const entries = Object.entries(map || {});
+  if (!entries.length) return _renderSupportKindRow('', 'REST');
+  return entries.map(([k, v]) => _renderSupportKindRow(k, v)).join('');
+}
+
+function _readSupportKindMap(container) {
+  const result = {};
+  container.querySelectorAll('#support-kind-map-rows .skm-row').forEach(row => {
+    const skey = row.querySelector('.skm-skey')?.value?.trim().toUpperCase();
+    const kind = row.querySelector('.skm-kind')?.value?.toUpperCase();
+    if (skey && kind) result[skey] = kind;
+  });
+  return result;
+}
+
+// ─── HTML escape ─────────────────────────────────────────────────────────────
 
 function _esc(s) {
   return String(s)

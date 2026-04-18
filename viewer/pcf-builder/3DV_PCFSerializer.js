@@ -6,6 +6,8 @@
 
 const f4 = (v) => Number(v).toFixed(4);
 const MSG = 'MESSAGE-SQUARE';
+// These coordinate keywords are written explicitly above — never duplicated from attributes
+const GEOMETRY_KEYS = new Set(['END-POINT', 'CO-ORDS', 'CENTRE-POINT', 'BRANCH1-POINT']);
 
 /**
  * Serialize components array to PCF text string.
@@ -19,12 +21,13 @@ export function serializeToPCF(components) {
     for (const comp of components) {
         const type = (comp.type || 'UNKNOWN').toUpperCase();
 
-        // MESSAGE-SQUARE blocks
+        // MESSAGE-SQUARE blocks — annotation text only (no coord lines)
         if (type === MSG) {
             lines.push(MSG);
-            for (const [, v] of Object.entries(comp.attributes || {})) {
-                lines.push(`    ${v}`);
-            }
+            // Prefer the normalised squareText field; fall back to first attribute value
+            const text = comp.squareText
+                || (Object.values(comp.attributes || {})[0] ?? '');
+            if (text) lines.push(`    ${text}`);
             lines.push('');
             continue;
         }
@@ -57,8 +60,10 @@ export function serializeToPCF(components) {
         }
 
         // All remaining attributes (SKEY, BORE, PIPELINE-REFERENCE, COMPONENT-ATTRIBUTEn …)
+        // Skip geometry keys — those are already emitted as dedicated lines above
         for (const [k, v] of Object.entries(comp.attributes || {})) {
-            lines.push(`    ${k} ${v}`);
+            if (GEOMETRY_KEYS.has(k)) continue;
+            lines.push(v !== '' ? `    ${k}  ${v}` : `    ${k}`);
         }
 
         lines.push(''); // blank line between components

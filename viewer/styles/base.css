@@ -377,3 +377,4 @@ body {
 .meta-table td { padding: 2px 8px; }
 .meta-table td:first-child { font-weight: 600; color: var(--color-muted); text-align: right; }
 .params-table .param-key { font-weight: 700; font-family: var(--font-mono); }
+
