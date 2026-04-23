@@ -1,5 +1,5 @@
-import { loadStickyState } from './state.js';
-import { state } from './state.js';
+import { loadStickyState, state, setActiveTab } from './state.js';
+import { RuntimeEvents } from '../contracts/runtime-events.js';
 import { renderViewer3D } from '../tabs/viewer3d-tab.js';
 import { renderAdvancedGlbViewerPanel } from '../js/pcf2glb/ui/AdvancedGlbViewerPanel.js';
 import { renderPcfxConverterTab } from '../tabs/pcfx-converter-tab.js';
@@ -47,8 +47,7 @@ function _buildTabBar() {
 
 function _switchTab(tabId) {
   const content = document.getElementById('tab-content');
-  state.activeTab = tabId;
-  emit('tab-changed', tabId);
+  setActiveTab(tabId);
   if (_activeDestroyFn) {
       try { _activeDestroyFn(); } catch (err) { console.error(err); }
       _activeDestroyFn = null;
