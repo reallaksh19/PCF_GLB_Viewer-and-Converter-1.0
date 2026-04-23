@@ -1,0 +1,1 @@
+Pass E2E UI: No placeholder/stub strings in routed components, alerts routed to notify().

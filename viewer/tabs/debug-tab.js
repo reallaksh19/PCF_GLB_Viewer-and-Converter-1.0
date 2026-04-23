@@ -1,3 +1,4 @@
+import { RuntimeEvents } from '../contracts/runtime-events.js';
 /**
  * debug-tab.js — Rich parser log, report population summary, computation details,
  *                validation errors, and raw parsed JSON viewer.
@@ -288,7 +289,7 @@ function _render(container) {
     // Trigger re-renders if elements changed
     if (hasChanges) {
         import('../core/event-bus.js').then(({ emit }) => {
-          emit('parse-complete', parsed);
+          emit(RuntimeEvents.PARSE_COMPLETE, parsed);
         });
     }
   });

@@ -59,20 +59,27 @@ function renderCenterPanel() {
         </select>
         <button class="model-exchange-button" data-action="toggle-verification">Verify 100%</button>
       </div>
-      <div class="model-exchange-section-title">Rendered Preview (data-driven placeholder)</div>
-      <div class="model-exchange-code">${escapeHtml(JSON.stringify({
-        theme: store.viewState.theme,
-        supportRenderMode: store.viewState.supportRenderMode,
-        verificationMode: store.viewState.verificationMode,
-        renderedSummary: rendered ? {
-          assemblies: rendered.assemblies.length,
-          nodes: rendered.nodes.length,
-          segments: rendered.segments.length,
-          supports: rendered.supportRenderItems.length,
-          annotations: rendered.annotationRenderItems.length,
-        } : null,
-        fidelity,
-      }, null, 2))}</div>
+      <div class="model-exchange-section-title">Rendered Inspector</div>
+      ${rendered ? `
+        <div class="mx-summary-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-top: 1rem;">
+          <div class="mx-card" style="padding: 1rem; border: 1px solid #243247; border-radius: 8px;">
+            <strong>Assemblies</strong><br><span style="font-size: 1.5rem; font-weight: bold; color: #1e90ff;">${rendered.assemblies.length}</span>
+          </div>
+          <div class="mx-card" style="padding: 1rem; border: 1px solid #243247; border-radius: 8px;">
+            <strong>Nodes</strong><br><span style="font-size: 1.5rem; font-weight: bold; color: #32cd32;">${rendered.nodes.length}</span>
+          </div>
+          <div class="mx-card" style="padding: 1rem; border: 1px solid #243247; border-radius: 8px;">
+            <strong>Supports</strong><br><span style="font-size: 1.5rem; font-weight: bold; color: #ff8c00;">${rendered.supportRenderItems.length}</span>
+          </div>
+          <div class="mx-card" style="padding: 1rem; border: 1px solid #243247; border-radius: 8px;">
+            <strong>Annotations</strong><br><span style="font-size: 1.5rem; font-weight: bold; color: #8a2be2;">${rendered.annotationRenderItems.length}</span>
+          </div>
+        </div>
+        <div style="margin-top: 1rem;">
+          <strong>Fidelity Summary:</strong>
+          <pre class="model-exchange-code">${escapeHtml(JSON.stringify(fidelity || {}, null, 2))}</pre>
+        </div>
+      ` : `<div class="mx-empty" style="margin-top: 1rem; color: #9aa8ba;">No rendered preview available for current source. Please load a project.</div>`}
     </div>
   `;
 }

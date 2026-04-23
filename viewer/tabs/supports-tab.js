@@ -1,3 +1,4 @@
+import { RuntimeEvents } from '../contracts/runtime-events.js';
 /**
  * supports-tab.js - Support mapping editor wired to Stage 1 and Stage 2 generation.
  */
@@ -35,7 +36,7 @@ function getRows() {
 function setRows(rows) {
   state.sticky.supportMappings = rows.map(normalizeRow);
   saveStickyState();
-  emit('support-mapping-changed', state.sticky.supportMappings);
+  emit(RuntimeEvents.SUPPORT_MAPPING_CHANGED, state.sticky.supportMappings);
 }
 
 export function renderSupports(container) {

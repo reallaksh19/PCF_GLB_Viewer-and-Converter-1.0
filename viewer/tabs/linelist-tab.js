@@ -1,3 +1,4 @@
+import { notify } from '../diagnostics/notification-center.js';
 import { getLinelist, getLinelistService } from '../core/linelist-store.js';
 
 export function renderLinelist(container) {
@@ -238,7 +239,7 @@ export function renderLinelist(container) {
               service.processRawData(file.name, rows);
               renderLinelist(container); // Re-render Tab
           } catch (err) {
-              alert("Error parsing CSV: " + err.message);
+              notify("Error parsing CSV: " + err.message);
           }
       };
       reader.readAsText(file);

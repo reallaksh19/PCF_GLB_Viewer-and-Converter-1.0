@@ -1,6 +1,8 @@
 /**
  * viewer-actions.js - Canonical action registry for 3D Viewer toolbar and shortcuts.
  */
+import { ViewerCommand, dispatchViewerCommand } from './contracts/viewer-commands.js';
+import { addTraceEvent } from './core/logger.js';
 
 export const ACTIONS = {
   NAV_SELECT: 'NAV_SELECT',
@@ -26,62 +28,72 @@ export const ACTIONS = {
 export function executeViewerAction(viewer, actionId) {
   if (!viewer || !actionId) return;
 
+  // We map the legacy viewer actions to the unified dispatchViewerCommand contract where appropriate.
   switch (actionId) {
     case ACTIONS.NAV_SELECT:
-      viewer.setNavMode?.('select');
+      dispatchViewerCommand({ viewer }, { type: ViewerCommand.SET_VIEW_MODE, payload: { mode: 'select' } });
+      addTraceEvent({ type: 'NAV_MODE_CHANGED', category: 'viewer3d', payload: { mode: 'select' } });
       break;
     case ACTIONS.NAV_ORBIT:
-      viewer.setNavMode?.('orbit');
+      dispatchViewerCommand({ viewer }, { type: ViewerCommand.SET_VIEW_MODE, payload: { mode: 'orbit' } });
+      addTraceEvent({ type: 'NAV_MODE_CHANGED', category: 'viewer3d', payload: { mode: 'orbit' } });
       break;
     case ACTIONS.MEASURE_TOOL:
-      viewer.setNavMode?.('measure');
+      dispatchViewerCommand({ viewer }, { type: ViewerCommand.TOGGLE_MEASURE });
+      addTraceEvent({ type: 'MEASURE_TOGGLED', category: 'viewer3d' });
       break;
     case ACTIONS.NAV_PLAN_X:
-      viewer.setNavMode?.('plan');
+      dispatchViewerCommand({ viewer }, { type: ViewerCommand.SET_VIEW_MODE, payload: { mode: 'plan' } });
+      addTraceEvent({ type: 'NAV_MODE_CHANGED', category: 'viewer3d', payload: { mode: 'plan' } });
       break;
     case ACTIONS.NAV_ROTATE_Y:
-      viewer.setNavMode?.('rotateY');
+      dispatchViewerCommand({ viewer }, { type: ViewerCommand.SET_VIEW_MODE, payload: { mode: 'rotateY' } });
+      addTraceEvent({ type: 'NAV_MODE_CHANGED', category: 'viewer3d', payload: { mode: 'rotateY' } });
       break;
     case ACTIONS.NAV_ROTATE_Z:
-      viewer.setNavMode?.('rotateZ');
+      dispatchViewerCommand({ viewer }, { type: ViewerCommand.SET_VIEW_MODE, payload: { mode: 'rotateZ' } });
+      addTraceEvent({ type: 'NAV_MODE_CHANGED', category: 'viewer3d', payload: { mode: 'rotateZ' } });
       break;
     case ACTIONS.NAV_PAN:
-      viewer.setNavMode?.('pan');
+      dispatchViewerCommand({ viewer }, { type: ViewerCommand.SET_VIEW_MODE, payload: { mode: 'pan' } });
+      addTraceEvent({ type: 'NAV_MODE_CHANGED', category: 'viewer3d', payload: { mode: 'pan' } });
       break;
     case ACTIONS.VIEW_MARQUEE_ZOOM:
-      viewer.setNavMode?.('marquee');
+      dispatchViewerCommand({ viewer }, { type: ViewerCommand.TOGGLE_MARQUEE_ZOOM });
+      addTraceEvent({ type: 'MARQUEE_ZOOM_TOGGLED', category: 'viewer3d' });
       break;
     case ACTIONS.VIEW_FIT_ALL:
-      viewer.fitAll?.();
+      dispatchViewerCommand({ viewer }, { type: ViewerCommand.FIT_ALL });
+      addTraceEvent({ type: 'FIT_ALL_EXECUTED', category: 'viewer3d', payload: { modelLoaded: !!viewer?.scene } });
       break;
     case ACTIONS.VIEW_FIT_SELECTION:
-      viewer.fitSelection?.();
+      dispatchViewerCommand({ viewer }, { type: ViewerCommand.FIT_SELECTION });
+      addTraceEvent({ type: 'FIT_SELECTION_EXECUTED', category: 'viewer3d', payload: { selectionCount: viewer?.selection?.size || 0 } });
       break;
     case ACTIONS.VIEW_TOGGLE_PROJECTION:
-      viewer.toggleProjection?.();
+      dispatchViewerCommand({ viewer }, { type: ViewerCommand.TOGGLE_PROJECTION });
+      addTraceEvent({ type: 'PROJECTION_TOGGLED', category: 'viewer3d' });
       break;
     case ACTIONS.SNAP_ISO_NW:
-      viewer.snapToPreset?.('isoNW');
-      break;
     case ACTIONS.SNAP_ISO_NE:
-      viewer.snapToPreset?.('isoNE');
-      break;
     case ACTIONS.SNAP_ISO_SW:
-      viewer.snapToPreset?.('isoSW');
-      break;
     case ACTIONS.SNAP_ISO_SE:
-      viewer.snapToPreset?.('isoSE');
+      const preset = actionId === ACTIONS.SNAP_ISO_NW ? 'isoNW' :
+                     actionId === ACTIONS.SNAP_ISO_NE ? 'isoNE' :
+                     actionId === ACTIONS.SNAP_ISO_SW ? 'isoSW' : 'isoSE';
+      dispatchViewerCommand({ viewer }, { type: ViewerCommand.SET_VIEW_MODE, payload: { mode: 'snap', preset } });
+      addTraceEvent({ type: 'SNAP_PRESET_EXECUTED', category: 'viewer3d', payload: { preset } });
       break;
     case ACTIONS.SECTION_BOX:
-      viewer.setSectionMode?.('BOX');
-      break;
     case ACTIONS.SECTION_PLANE_UP:
-      viewer.setSectionMode?.('PLANE_UP');
-      break;
     case ACTIONS.SECTION_DISABLE:
-      viewer.disableSection?.();
+      const secMode = actionId === ACTIONS.SECTION_BOX ? 'BOX' :
+                      actionId === ACTIONS.SECTION_PLANE_UP ? 'PLANE_UP' : 'DISABLE';
+      dispatchViewerCommand({ viewer }, { type: ViewerCommand.TOGGLE_SECTION, payload: { mode: secMode } });
+      addTraceEvent({ type: 'SECTION_MODE_CHANGED', category: 'viewer3d', payload: { mode: secMode } });
       break;
     default:
+      console.warn(`[executeViewerAction] Unknown action: ${actionId}`);
       break;
   }
 }
