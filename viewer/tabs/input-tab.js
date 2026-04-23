@@ -1,3 +1,4 @@
+import { RuntimeEvents } from '../contracts/runtime-events.js';
 /**
  * input-tab.js — Input Data: Pipe Properties table + node-wise Applied Loads picker.
  *
@@ -276,7 +277,7 @@ function _wireEvents(container, forces, pipeGroups, classGroups) {
     if (!f || _pinnedLoads.some(p => p.node === f.node)) return;
     _pinnedLoads.push({ ...f });
     state.pinnedLoadNodes = [..._pinnedLoads];
-    emit('load-pinned', state.pinnedLoadNodes);
+    emit(RuntimeEvents.LOAD_PINNED, state.pinnedLoadNodes);
     _refreshPinnedTable(container);
   });
 
@@ -286,14 +287,14 @@ function _wireEvents(container, forces, pipeGroups, classGroups) {
     if (!btn) return;
     _pinnedLoads.splice(Number(btn.dataset.pinIdx), 1);
     state.pinnedLoadNodes = [..._pinnedLoads];
-    emit('load-pinned', state.pinnedLoadNodes);
+    emit(RuntimeEvents.LOAD_PINNED, state.pinnedLoadNodes);
     _refreshPinnedTable(container);
   });
 
   // File input
   container.querySelector('#accdb-file-input')?.addEventListener('change', e => {
     const file = e.target.files[0];
-    if (file) emit('file-dropped', file);
+    if (file) emit(RuntimeEvents.FILE_DROPPED, file);
   });
 
   // Pickers listeners

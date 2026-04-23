@@ -1,3 +1,4 @@
+import { RuntimeEvents } from '../contracts/runtime-events.js';
 /**
  * viewer3d-tab.js - 3D Viewer tab with dedicated viewer3DConfig wiring.
  */
@@ -16,6 +17,7 @@ import { resolveActionOrder, executeViewerAction } from '../viewer-actions.js';
 import { buildComponentPanelModel } from '../viewer3d/component-panel-model.js';
 import { renderConfig } from './config-tab.js';
 import { importFromRawFile } from '../js/pcf2glb/import/ImportFromRawParser.js';
+import { notify } from '../diagnostics/notification-center.js';
 
 let _viewer = null;
 let _listenersRegistered = false;
@@ -540,7 +542,7 @@ function _wireViewerControls(container, cfg, actions) {
       const mock = await _resolveMockPayload(mockKey);
       const text = String(mock?.pcfText || '');
       if (!text.trim()) {
-        alert(`Mock payload is empty for ${mockKey}. Update it in Config tab.`);
+        notify({ level: 'warning', title: 'Mock Load', message: `Mock payload is empty for ${mockKey}. Update it in Config tab.` });
         return;
       }
       const name = String(mock?.fileName || `${mockKey}.pcf`);
@@ -548,7 +550,7 @@ function _wireViewerControls(container, cfg, actions) {
       _rerenderIfActive();
     } catch (error) {
       console.error(error);
-      alert(`Failed to load ${mockKey}: ${String(error?.message || error)}`);
+      notify({ level: 'error', title: 'Mock Error', message: `Failed to load ${mockKey}: ${String(error?.message || error)}` });
     }
   };
 
@@ -582,11 +584,11 @@ function _wireViewerControls(container, cfg, actions) {
         saveStickyState();
         _rerenderIfActive();
       } else {
-        alert("Failed to parse mock XML: \n" + (log.length > 0 ? log.join('\n') : 'Unknown error.'));
+        notify({ level: 'error', title: 'Parse Error', message: "Failed to parse mock XML: \n" + (log.length > 0 ? log.join('\n') : 'Unknown error.'), details: log });
       }
     } catch (error) {
       console.error(error);
-      alert(`Failed to load Mock XML: ${String(error?.message || error)}`);
+      notify({ level: 'error', title: 'Load Error', message: `Failed to load Mock XML: ${String(error?.message || error)}` });
     }
   });
 
@@ -612,7 +614,7 @@ function _wireViewerControls(container, cfg, actions) {
       _rerenderIfActive();
     } catch (error) {
       console.error(error);
-      alert(`Failed to load PCF: ${String(error?.message || error)}`);
+      notify({ level: 'error', title: 'Load Error', message: `Failed to load PCF: ${String(error?.message || error)}` });
     } finally {
       event.target.value = '';
     }
@@ -695,7 +697,7 @@ function _wireViewerControls(container, cfg, actions) {
     state.viewer3DConfig.spareOverlays[spareKey].selectedField = selectedField;
     saveStickyState();
     _setStatusMessage(container, `${spareKey === 'spare1' ? 'Spare 1' : 'Spare 2'} loaded: ${parsed.rows.length} mapped row(s) from ${parsed.fileName}.`);
-    emit('viewer3d-config-changed', { source: 'viewer3d-tab', reason: `${spareKey}-updated` });
+    emit(RuntimeEvents.VIEWER3D_CONFIG_CHANGED, { source: 'viewer3d-tab', reason: `${spareKey}-updated` });
     closeSpareModal();
   });
   container.querySelector('#viewer3d-import-raw-input')?.addEventListener('change', async (event) => {
@@ -720,18 +722,22 @@ function _wireViewerControls(container, cfg, actions) {
         _rerenderIfActive();
       } else {
         console.warn('[ImportRaw] Import failed:', log);
-        alert(result.message || 'Import failed — check the browser console for details.');
+        notify({ level: 'error', title: 'Import failed', message: result.message || 'Import failed — check the browser console for details.', details: log });
       }
     } catch (err) {
       console.error('[ImportRaw]', err);
-      alert(`Import error: ${err?.message || err}`);
+      notify({ level: 'error', title: 'Import error', message: String(err?.message || err) });
     } finally {
       if (label) label.style.opacity = '';
       event.target.value = '';
     }
   });
-  container.querySelector('#viewer3d-fit-btn')?.addEventListener('click', () => _viewer?.fitAll?.());
-  container.querySelector('#viewer3d-fit-sel-btn')?.addEventListener('click', () => _viewer?.fitSelection?.());
+  container.querySelector('#viewer3d-fit-btn')?.addEventListener('click', () => {
+    executeViewerAction(_viewer, 'VIEW_FIT_ALL');
+  });
+  container.querySelector('#viewer3d-fit-sel-btn')?.addEventListener('click', () => {
+    executeViewerAction(_viewer, 'VIEW_FIT_SELECTION');
+  });
   container.querySelector('#viewer3d-open-config')?.addEventListener('click', () => {
     const modal = container.querySelector('#viewer3d-config-modal');
     const modalContent = container.querySelector('#viewer3d-config-content');
@@ -757,7 +763,7 @@ function _wireViewerControls(container, cfg, actions) {
       gridPlane: 'auto',
     };
     saveStickyState();
-    emit('viewer3d-config-changed', { source: 'viewer3d-tab', reason: 'vertical-axis' });
+    emit(RuntimeEvents.VIEWER3D_CONFIG_CHANGED, { source: 'viewer3d-tab', reason: 'vertical-axis' });
   });
 
   container.querySelectorAll('[data-viewer-action]').forEach((btn) => {
@@ -777,7 +783,7 @@ function _wireViewerControls(container, cfg, actions) {
     state.viewer3DConfig.heatmap.metric = heatmapMetric?.value || 'T1';
     state.viewer3DConfig.heatmap.bucketCount = Number(heatmapBuckets?.value || 5);
     saveStickyState();
-    emit('viewer3d-config-changed', { source: 'viewer3d-tab', reason: 'heatmap-updated' });
+    emit(RuntimeEvents.VIEWER3D_CONFIG_CHANGED, { source: 'viewer3d-tab', reason: 'heatmap-updated' });
   };
 
   heatmapEnabled?.addEventListener('change', applyHeatmapConfig);
@@ -789,7 +795,7 @@ function _wireViewerControls(container, cfg, actions) {
     if (!state.viewer3DConfig.nodes) state.viewer3DConfig.nodes = {};
     state.viewer3DConfig.nodes.enabled = !!e.target.checked;
     saveStickyState();
-    emit('viewer3d-config-changed', { source: 'viewer3d-tab', reason: 'nodes-toggled' });
+    emit(RuntimeEvents.VIEWER3D_CONFIG_CHANGED, { source: 'viewer3d-tab', reason: 'nodes-toggled' });
   });
   const lineEnabled = container.querySelector('#viewer3d-top-line-enabled');
   lineEnabled?.addEventListener('change', (e) => {
@@ -797,14 +803,14 @@ function _wireViewerControls(container, cfg, actions) {
     if (!state.viewer3DConfig.overlay.annotations) state.viewer3DConfig.overlay.annotations = {};
     state.viewer3DConfig.overlay.annotations.messageSquareEnabled = !!e.target.checked;
     saveStickyState();
-    emit('viewer3d-config-changed', { source: 'viewer3d-tab', reason: 'line-labels-toggled' });
+    emit(RuntimeEvents.VIEWER3D_CONFIG_CHANGED, { source: 'viewer3d-tab', reason: 'line-labels-toggled' });
   });
   const lengthEnabled = container.querySelector('#viewer3d-top-length-enabled');
   lengthEnabled?.addEventListener('change', (e) => {
     if (!state.viewer3DConfig.lengthLabels) state.viewer3DConfig.lengthLabels = {};
     state.viewer3DConfig.lengthLabels.enabled = !!e.target.checked;
     saveStickyState();
-    emit('viewer3d-config-changed', { source: 'viewer3d-tab', reason: 'length-labels-toggled' });
+    emit(RuntimeEvents.VIEWER3D_CONFIG_CHANGED, { source: 'viewer3d-tab', reason: 'length-labels-toggled' });
   });
   container.querySelector('#viewer3d-label-min-gap')?.addEventListener('change', (e) => {
     const v = Number(e.target.value);
@@ -812,7 +818,7 @@ function _wireViewerControls(container, cfg, actions) {
       if (!state.viewer3DConfig.lengthLabels) state.viewer3DConfig.lengthLabels = {};
       state.viewer3DConfig.lengthLabels.minWorldGap = v;
       saveStickyState();
-      emit('viewer3d-config-changed', { source: 'viewer3d-tab', reason: 'length-labels-toggled' });
+      emit(RuntimeEvents.VIEWER3D_CONFIG_CHANGED, { source: 'viewer3d-tab', reason: 'length-labels-toggled' });
     }
   });
   container.querySelector('#viewer3d-theme-select')?.addEventListener('change', (e) => {
@@ -825,7 +831,7 @@ function _wireViewerControls(container, cfg, actions) {
     state.viewer3DConfig.scene.themePreset = newTheme;
     
     saveStickyState();
-    emit('viewer3d-config-changed', { source: 'viewer3d-tab', reason: 'theme-changed' });
+    emit(RuntimeEvents.VIEWER3D_CONFIG_CHANGED, { source: 'viewer3d-tab', reason: 'theme-changed' });
   });
   const overlayScale = container.querySelector('#viewer3d-overlay-scale');
   const overlayScaleValue = container.querySelector('#viewer3d-overlay-scale-value');
@@ -849,7 +855,7 @@ function _wireViewerControls(container, cfg, actions) {
     if (!state.viewer3DConfig.supportGeometry) state.viewer3DConfig.supportGeometry = {};
     state.viewer3DConfig.supportGeometry.symbolScale = scale;
     saveStickyState();
-    emit('viewer3d-config-changed', { source: 'viewer3d-tab', reason: 'support-symbol-scale' });
+    emit(RuntimeEvents.VIEWER3D_CONFIG_CHANGED, { source: 'viewer3d-tab', reason: 'support-symbol-scale' });
   };
   supportScale?.addEventListener('input', applySupportScale);
 
@@ -877,7 +883,7 @@ function _wireViewerControls(container, cfg, actions) {
       state.viewer3DConfig.spareOverlays.spare2.selectedField = String(spare2Field?.value || '');
     }
     saveStickyState();
-    emit('viewer3d-config-changed', { source: 'viewer3d-tab', reason: `${spareKey}-updated` });
+    emit(RuntimeEvents.VIEWER3D_CONFIG_CHANGED, { source: 'viewer3d-tab', reason: `${spareKey}-updated` });
   };
   spare1Enabled?.addEventListener('change', () => applySpareConfig('spare1'));
   spare1Field?.addEventListener('change', () => applySpareConfig('spare1'));
