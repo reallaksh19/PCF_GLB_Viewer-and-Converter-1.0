@@ -1,3 +1,4 @@
+import { RuntimeEvents } from '../contracts/runtime-events.js';
 /**
  * logger.js - Diagnostic logging utility for data, geometry, and 3D interaction trace.
  */
@@ -41,7 +42,7 @@ export function writeSessionLog(logEntry) {
     const d = new Date();
     const dateStr = `${d.getDate().toString().padStart(2, '0')}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getFullYear().toString().slice(-2)}`;
     const timeStr = `${d.getHours().toString().padStart(2, '0')}.${d.getMinutes().toString().padStart(2, '0')}`;
-    emit('session-log', { dateStr, timeStr, entry: logEntry });
+    emit(RuntimeEvents.SESSION_LOG, { dateStr, timeStr, entry: logEntry });
   } catch (e) {
     console.error('Failed to write session log', e);
   }
@@ -92,7 +93,7 @@ export function addLog(options) {
     writeSessionLog(logEntry);
   }
 
-  emit('log-added', logEntry);
+  emit(RuntimeEvents.LOG_ADDED, logEntry);
   notifyListeners();
   return logEntry;
 }
@@ -116,14 +117,14 @@ export function addTraceEvent(options) {
 
   traceEvents.push(evt);
   if (traceEvents.length > 5000) traceEvents.splice(0, traceEvents.length - 5000);
-  emit('trace-added', evt);
+  emit(RuntimeEvents.TRACE_ADDED, evt);
   notifyTraceListeners();
   return evt;
 }
 
 export function clearTraceEvents() {
   traceEvents.length = 0;
-  emit('trace-cleared');
+  emit(RuntimeEvents.TRACE_CLEARED);
   notifyTraceListeners();
 }
 
@@ -142,14 +143,14 @@ export function resolveLog(id) {
   const log = logs.find((l) => l.id === id);
   if (log) {
     log.resolved = true;
-    emit('log-resolved', log);
+    emit(RuntimeEvents.LOG_RESOLVED, log);
     notifyListeners();
   }
 }
 
 export function clearLogs() {
   logs.length = 0;
-  emit('logs-cleared');
+  emit(RuntimeEvents.LOGS_CLEARED);
   notifyListeners();
 }
 

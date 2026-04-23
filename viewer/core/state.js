@@ -1,3 +1,5 @@
+import { emit } from './event-bus.js';
+import { RuntimeEvents } from '../contracts/runtime-events.js';
 /**
  * state.js - Shared singleton state for the viewer app.
  * All modules read/write through this object; changes are broadcast via event-bus.
@@ -271,4 +273,40 @@ export function saveStickyState() {
   } catch (e) {
     // no-op
   }
+}
+
+// -- State Mutation Discipline (A1) --
+
+export function setActiveTab(tabId) {
+  state.activeTab = tabId;
+  emit(RuntimeEvents.TAB_CHANGED, tabId);
+}
+
+export function updateViewer3DConfig(patch, reason = 'update') {
+  if (typeof patch === 'function') {
+    state.viewer3DConfig = patch(state.viewer3DConfig);
+  } else {
+    Object.assign(state.viewer3DConfig, patch);
+  }
+  emit(RuntimeEvents.VIEWER3D_CONFIG_CHANGED, { source: 'state-mutation', reason });
+}
+
+export function setSourceMetadata(metadata) {
+  Object.assign(state.sticky, metadata);
+  saveStickyState();
+  emit(RuntimeEvents.DOCNO_CHANGED, state.sticky.docNo);
+}
+
+export function updateModelExchangeSelection(selection) {
+  if (!state.editorState) {
+    state.editorState = { selection: { ids: [] } };
+  }
+  state.editorState.selection.ids = selection;
+}
+
+export function updateDiagnosticSnapshot(name, data) {
+  if (!state.editorState.diagnostics) {
+    state.editorState.diagnostics = { traces: [], metrics: {} };
+  }
+  state.editorState.diagnostics.metrics[name] = data;
 }

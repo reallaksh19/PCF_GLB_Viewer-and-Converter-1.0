@@ -29,19 +29,19 @@ This pack converts the master upgrade plan into **agent-owned markdown files** w
 
 ## Current repo realities that shaped the split
 
-1. **There are two shell roots.**  
+1. **There are two shell roots.**
    `core/app.js` includes `Model Exchange`; `viewer/core/app.js` does not. This is a sign of split runtime ownership and must be normalized early.
 
-2. **The XML transition is real but not complete.**  
+2. **The XML transition is real but not complete.**
    The new path exists under `viewer/interchange/source/xml/CaesarXmlImportAdapter.js`, `viewer/interchange/builders/xml/*`, and `viewer/interchange/canonical/*`, but active UI still mixes older direct-flow paths.
 
-3. **The debug drawer is useful but narrow.**  
+3. **The debug drawer is useful but narrow.**
    `viewer/debug/dev-debug-window.js` is currently focused on logs, trace, support debug, event bus capture, and a small scene tab. It is not yet the full professional diagnostics surface.
 
-4. **Some active surfaces are placeholders or only partly integrated.**  
+4. **Some active surfaces are placeholders or only partly integrated.**
    `viewer/tabs/model-exchange-tab.js` literally renders “Rendered Preview (data-driven placeholder)”. There are also import/export adapters and PDF/ACCDB builders with TODO markers.
 
-5. **Production UI still uses blocking `alert()` paths.**  
+5. **Production UI still uses blocking `alert()` paths.**
    Notably inside `viewer/tabs/viewer3d-tab.js`, `viewer/tabs/config-tab.js`, and `viewer/tabs/linelist-tab.js`. These should be replaced with a unified notification + diagnostics path.
 
 ## Upgrade waves

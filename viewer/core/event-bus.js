@@ -1,27 +1,25 @@
 /**
  * event-bus.js — Minimal pub/sub for inter-module communication.
- *
- * Events used by the app:
- *   'file-loaded'     — new ACCDB text available in state
- *   'parse-complete'  — state.parsed updated
- *   'tab-changed'     — state.activeTab updated
- *   'scope-changed'   — state.scopeToggles updated
- *   'legend-changed'  — state.legendField updated
- *   'geo-toggle'      — state.geoToggles updated
- *   'load-pinned'     — state.pinnedLoadNodes updated
  */
+import { assertRuntimeEvent } from '../contracts/runtime-events.js';
 
-const listeners = {};
+const listeners = new Map();
 
 export function on(event, fn) {
-  (listeners[event] ??= []).push(fn);
+  assertRuntimeEvent(event);
+  const list = listeners.get(event) || [];
+  list.push(fn);
+  listeners.set(event, list);
 }
 
 export function off(event, fn) {
-  if (!listeners[event]) return;
-  listeners[event] = listeners[event].filter(f => f !== fn);
+  assertRuntimeEvent(event);
+  const list = listeners.get(event);
+  if (!list) return;
+  listeners.set(event, list.filter(f => f !== fn));
 }
 
 export function emit(event, payload) {
-  (listeners[event] ?? []).forEach(fn => fn(payload));
+  assertRuntimeEvent(event);
+  for (const fn of listeners.get(event) || []) fn(payload);
 }
