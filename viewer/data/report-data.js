@@ -71,3 +71,12 @@ export const CONCLUSIONS = [
   'FLANGE LEAKAGE CHECK PASSED',
   'SUSTAINED SAG WITHIN THE LIMIT',
 ];
+
+
+export function buildCurrentReportData(appState) {
+  return {
+    meta: META,
+    designParams: DESIGN_PARAMS,
+    extractedAt: new Date().toISOString()
+  };
+}

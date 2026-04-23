@@ -8,6 +8,7 @@ import { on } from '../core/event-bus.js';
 import { prettyUnit, unitSuffix } from '../utils/formatter.js';
 import { buildUniversalCSV, normalizeToPCF, buildPcfFromContinuity } from '../utils/accdb-to-pcf.js';
 import { calcHistory } from '../calc/core/calc-session.js';
+import { buildCurrentReportData } from '../data/report-data.js';
 
 let _listenersRegistered = false;
 
@@ -705,4 +706,14 @@ function _jsonSection(parsed, section) {
 
 function _esc(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+
+export function exportDebugSnapshot() {
+  return {
+    parsed: state.parsed,
+    errors: state.errors,
+    calcHistory,
+    reportData: buildCurrentReportData ? buildCurrentReportData(state) : null,
+  };
 }
