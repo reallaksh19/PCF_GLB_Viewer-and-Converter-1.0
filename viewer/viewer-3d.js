@@ -10,6 +10,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { state } from './core/state.js';
+import { THEME_PALETTES, THEME_SCENE_STYLES } from './viewer-3d-defaults.js';
+import { debugSupport } from './debug/support-debug.js';
 
 let CURRENT_VERTICAL_AXIS = 'Z';
 
@@ -318,6 +320,19 @@ function _buildSupportFrame(pipeAxis, supportAxis) {
     let lateral = null;
     if (supportAxis && Math.abs(supportAxis.dot(vertical)) < 0.95) {
         lateral = supportAxis.clone().normalize();
+
+        // ── VISUAL GEOMETRY FIX ──
+        // If the restriction axis is parallel to the pipe (e.g., an axial stop),
+        // projecting the lateral geometry along this axis embeds arrows radially
+        // inside the pipe cylinder mesh. We force it orthogonal to expose the arrows.
+        if (Math.abs(lateral.dot(pipe)) > 0.95) {
+            lateral = new THREE.Vector3().crossVectors(vertical, pipe);
+            if (lateral.length() < 0.01) {
+                const fallback = Math.abs(pipe.x) < 0.8 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1);
+                lateral.crossVectors(vertical, fallback);
+            }
+            lateral.normalize();
+        }
     } else {
         lateral = new THREE.Vector3().crossVectors(vertical, pipe);
         if (lateral.length() < 0.01) {
@@ -396,14 +411,13 @@ export class PcfViewer3D {
 
         // Scene
         this.scene = new THREE.Scene();
-        const themeKey = this.viewerConfig?.scene?.themePreset || state.viewerSettings.themePreset || 'NavisDark';
-        const themeBg = themeKey === 'DrawLight' ? 0xf7f8fb
-            : themeKey === 'DrawDark' ? 0x0b1220
-            : 0x0f172a;
-        const background = String(this.viewerConfig?.scene?.background || 'auto').toLowerCase() === 'auto'
-            ? themeBg
-            : this.viewerConfig?.scene?.background;
-        this.scene.background = new THREE.Color(background);
+        const themeKey = this._getThemeKey();
+        const themeStyle = this._resolveThemeStyle();
+        const backgroundConfig = String(this.viewerConfig?.scene?.background || 'auto').toLowerCase();
+        const background = backgroundConfig === 'auto'
+            ? new THREE.Color(themeStyle.background)
+            : new THREE.Color(this.viewerConfig?.scene?.background);
+        this.scene.background = background;
 
         // Camera — Orthographic
         const aspect = w / h;
@@ -429,7 +443,10 @@ export class PcfViewer3D {
         this._applyUpVector();
 
         // Renderer
-        this.renderer = new THREE.WebGLRenderer({ antialias: this.viewerConfig?.scene?.antialias !== false });
+        this.renderer = new THREE.WebGLRenderer({
+            antialias: this.viewerConfig?.scene?.antialias !== false,
+            alpha: false
+        });
         this.renderer.setSize(w, h);
         this.renderer.setPixelRatio(window.devicePixelRatio);
         this.container.appendChild(this.renderer.domElement);
@@ -501,18 +518,7 @@ export class PcfViewer3D {
         this.scene.add(dir);
 
         // Grid + Axes
-        const gridMajor = themeKey === 'DrawLight' ? 0xcfd6e2 : 0x3a4255;
-        const gridMinor = themeKey === 'DrawLight' ? 0xe6ebf2 : 0x252a3a;
-        this._gridHelper = new THREE.GridHelper(
-            Number(this.viewerConfig?.helpers?.gridSize || 10000),
-            Number(this.viewerConfig?.helpers?.gridDivisions || 20),
-            gridMajor,
-            gridMinor
-        );
-        this._gridHelper.visible = this.viewerConfig?.helpers?.showGrid !== false;
-        // Grid should always be on XZ plane, matching standard Three.js where Y is vertical.
-        this._gridHelper.rotation.x = 0;
-        this._gridHelper.position.y = -500;
+        this._gridHelper = this._buildGridHelper(themeStyle);
         this.scene.add(this._gridHelper);
 
         const axes = new THREE.AxesHelper(1000);
@@ -1462,6 +1468,11 @@ export class PcfViewer3D {
      */
     render(components) {
         this._emitTrace('render-start', { components: Array.isArray(components) ? components.length : 0 });
+
+        // Sync palette and scene styling dynamically
+        this._palette = this._resolvePalette();
+        this._applyThemeAppearance();
+
         // Remove old component group
         if (this._componentGroup) {
             this.scene.remove(this._componentGroup);
@@ -1746,12 +1757,14 @@ export class PcfViewer3D {
         const dofAnchor = dofSet.size >= 6;
         const dofGuide = dofSet.size > 0 && [...dofSet].every(v => v === 1 || v === 3);
         const axisSemanticKind = _semanticSupportKindFromAxisCosinesText(attrs.AXIS_COSINES || attrs['AXIS-COSINES'] || '');
+
         if (dofAnchor) supportKind = 'ANCHOR';
         else if (dofRest) supportKind = 'REST';
         else if (dofGuide && supportKind === 'UNKNOWN') supportKind = 'GUIDE';
         else if (axisSemanticKind === 'REST' && supportKind !== 'ANCHOR') supportKind = 'REST';
         else if (axisSemanticKind === 'GUIDE' && supportKind === 'UNKNOWN') supportKind = 'GUIDE';
         if (explicitRest && supportKind !== 'ANCHOR') supportKind = 'REST';
+
         const isFixed = supportKind === 'ANCHOR';
         let supportAxis = _axisFromCosinesText(attrs.AXIS_COSINES || attrs['AXIS-COSINES'] || '');
 
@@ -1766,16 +1779,40 @@ export class PcfViewer3D {
 
         if (supportAxis && !isFixed) {
             const verticalness = Math.abs(supportAxis.dot(up));
-            // Keep explicit REST/+Y supports vertical; axis-cosines in upstream data
-            // may represent restraint DOF orientation, not the visual support arrow.
             if (supportKind === 'REST' || supportKind === 'SPRING') {
-                // no-op
+                // keep explicit rest vertical
             } else if (verticalness > 0.75) {
-                if (supportKind === 'GUIDE' || supportKind === 'STOP') return [];
+                if (supportKind === 'GUIDE' || supportKind === 'STOP') {
+                    debugSupport({
+                        stage: 'viewer-build-support',
+                        componentId: comp.id,
+                        supportName: attrs.SUPPORT_NAME,
+                        supportKind,
+                        supportDirection: attrs.SUPPORT_DIRECTION,
+                        axisCosines: attrs.AXIS_COSINES,
+                        pipeAxisCosines: attrs.PIPE_AXIS_COSINES,
+                        dropped: true,
+                        dropReason: 'guide-or-stop-axis-too-vertical',
+                        renderBranch: 'dropped',
+                    });
+                    return [];
+                }
                 if (supportKind === 'UNKNOWN') supportKind = 'REST';
             } else if (verticalness < 0.35) {
                 supportKind = 'GUIDE';
             } else {
+                debugSupport({
+                    stage: 'viewer-build-support',
+                    componentId: comp.id,
+                    supportName: attrs.SUPPORT_NAME,
+                    supportKind,
+                    supportDirection: attrs.SUPPORT_DIRECTION,
+                    axisCosines: attrs.AXIS_COSINES,
+                    pipeAxisCosines: attrs.PIPE_AXIS_COSINES,
+                    dropped: true,
+                    dropReason: 'axis-mid-tilt-unsupported',
+                    renderBranch: 'dropped',
+                });
                 return [];
             }
         } else if (supportKind === 'UNKNOWN') {
@@ -1797,7 +1834,23 @@ export class PcfViewer3D {
         const verticalTip = verticalAxis.clone().multiplyScalar(-r * 1.02);
         const verticalStart = verticalAxis.clone().multiplyScalar(-r * 2.1);
 
+        let renderBranch = 'unknown';
+        let warning = '';
+
         if (supportKind === 'ANCHOR') {
+            renderBranch = 'anchor';
+            debugSupport({
+                stage: 'viewer-build-support',
+                componentId: comp.id,
+                supportName: attrs.SUPPORT_NAME,
+                supportKind,
+                supportDirection: attrs.SUPPORT_DIRECTION,
+                axisCosines: attrs.AXIS_COSINES,
+                pipeAxisCosines: attrs.PIPE_AXIS_COSINES,
+                bore: comp.bore,
+                renderBranch,
+            });
+
             const plateSize = r * 1.7;
             const thickness = Math.max(r * 0.24, 0.08 * r);
             const plate = new THREE.Mesh(new THREE.BoxGeometry(plateSize, plateSize, thickness), anchorMat);
@@ -1808,7 +1861,33 @@ export class PcfViewer3D {
         }
 
         if (supportKind === 'GUIDE') {
-            if (!lateralAxis) return [];
+            renderBranch = 'guide';
+            if (!lateralAxis) {
+                debugSupport({
+                    stage: 'viewer-build-support',
+                    componentId: comp.id,
+                    supportName: attrs.SUPPORT_NAME,
+                    supportKind,
+                    supportDirection: attrs.SUPPORT_DIRECTION,
+                    dropped: true,
+                    dropReason: 'missing-lateral-axis',
+                    renderBranch: 'dropped',
+                });
+                return [];
+            }
+
+            debugSupport({
+                stage: 'viewer-build-support',
+                componentId: comp.id,
+                supportName: attrs.SUPPORT_NAME,
+                supportKind,
+                supportDirection: attrs.SUPPORT_DIRECTION,
+                axisCosines: attrs.AXIS_COSINES,
+                pipeAxisCosines: attrs.PIPE_AXIS_COSINES,
+                bore: comp.bore,
+                renderBranch,
+            });
+
             const lateral = lateralAxis.clone().normalize();
             return [createSupportAssembly(pos, [
                 createArrowBetween(
@@ -1830,14 +1909,45 @@ export class PcfViewer3D {
         }
 
         if (supportKind === 'REST') {
+            renderBranch = 'rest';
+            if ((attrs.SUPPORT_TAG || '').toUpperCase().includes('GUIDE') || (attrs.SUPPORT_TAG || '').toUpperCase().includes('STOP')) {
+                warning = 'renderer-fallback';
+            }
+
+            debugSupport({
+                stage: 'viewer-build-support',
+                componentId: comp.id,
+                supportName: attrs.SUPPORT_NAME,
+                supportKind,
+                supportDirection: attrs.SUPPORT_DIRECTION,
+                axisCosines: attrs.AXIS_COSINES,
+                pipeAxisCosines: attrs.PIPE_AXIS_COSINES,
+                bore: comp.bore,
+                renderBranch,
+                warning,
+            });
+
             return [createSupportAssembly(pos, [
                 createArrowBetween(verticalStart, verticalTip, color, supportMat, r),
             ].filter(Boolean))];
         }
 
         if (supportKind === 'SPRING') {
-            const headLen = 0.4 * r;
+            renderBranch = 'spring';
 
+            debugSupport({
+                stage: 'viewer-build-support',
+                componentId: comp.id,
+                supportName: attrs.SUPPORT_NAME,
+                supportKind,
+                supportDirection: attrs.SUPPORT_DIRECTION,
+                axisCosines: attrs.AXIS_COSINES,
+                pipeAxisCosines: attrs.PIPE_AXIS_COSINES,
+                bore: comp.bore,
+                renderBranch,
+            });
+
+            const headLen = 0.4 * r;
             const pts = [];
             pts.push(verticalStart.clone());
             pts.push(verticalTip.clone().addScaledVector(verticalAxis, -headLen));
@@ -1857,7 +1967,33 @@ export class PcfViewer3D {
         }
 
         if (supportKind === 'STOP') {
-            if (!lateralAxis) return [];
+            renderBranch = 'stop';
+            if (!lateralAxis) {
+                debugSupport({
+                    stage: 'viewer-build-support',
+                    componentId: comp.id,
+                    supportName: attrs.SUPPORT_NAME,
+                    supportKind,
+                    supportDirection: attrs.SUPPORT_DIRECTION,
+                    dropped: true,
+                    dropReason: 'missing-lateral-axis',
+                    renderBranch: 'dropped',
+                });
+                return [];
+            }
+
+            debugSupport({
+                stage: 'viewer-build-support',
+                componentId: comp.id,
+                supportName: attrs.SUPPORT_NAME,
+                supportKind,
+                supportDirection: attrs.SUPPORT_DIRECTION,
+                axisCosines: attrs.AXIS_COSINES,
+                pipeAxisCosines: attrs.PIPE_AXIS_COSINES,
+                bore: comp.bore,
+                renderBranch,
+            });
+
             const lateral = lateralAxis.clone().normalize();
             return [createSupportAssembly(pos, [
                 createArrowBetween(
@@ -1876,6 +2012,17 @@ export class PcfViewer3D {
                 ),
             ].filter(Boolean))];
         }
+
+        debugSupport({
+            stage: 'viewer-build-support',
+            componentId: comp.id,
+            supportName: attrs.SUPPORT_NAME,
+            supportKind,
+            supportDirection: attrs.SUPPORT_DIRECTION,
+            dropped: true,
+            dropReason: 'unknown-kind',
+            renderBranch: 'dropped',
+        });
 
         return [];
     }
@@ -2244,19 +2391,97 @@ export class PcfViewer3D {
     }
 
     _resolvePalette() {
+        const themeKey = state.viewerSettings?.themePreset || this.viewerConfig?.scene?.themePreset || 'NavisDark';
+        const themePalette = THEME_PALETTES[themeKey] || THEME_PALETTES.NavisDark;
         const palette = { ...COLORS };
-        const cfgPalette = this.viewerConfig?.palette || {};
-        for (const [k, v] of Object.entries(cfgPalette)) {
-            if (typeof v === 'number') {
-                palette[k.toUpperCase()] = v;
-                continue;
-            }
-            const text = String(v || '').trim();
-            if (/^#[0-9a-fA-F]{6}$/.test(text)) {
-                palette[k.toUpperCase()] = Number.parseInt(text.slice(1), 16);
-            }
+        for (const [k, hex] of Object.entries(themePalette)) {
+            palette[k.toUpperCase()] = Number.parseInt(hex.slice(1), 16);
         }
         return palette;
+    }
+
+    _getThemeKey() {
+        return state.viewerSettings?.themePreset
+            || this.viewerConfig?.scene?.themePreset
+            || 'NavisDark';
+    }
+
+    _resolveThemeStyle() {
+        const themeKey = this._getThemeKey();
+        return THEME_SCENE_STYLES[themeKey] || THEME_SCENE_STYLES.NavisDark;
+    }
+
+    _buildGridHelper(themeStyle) {
+        const gridMajor = Number.parseInt(String(themeStyle.gridMajor || '#3a4255').replace('#', ''), 16);
+        const gridMinor = Number.parseInt(String(themeStyle.gridMinor || '#252a3a').replace('#', ''), 16);
+
+        const grid = new THREE.GridHelper(
+            Number(this.viewerConfig?.helpers?.gridSize || 10000),
+            Number(this.viewerConfig?.helpers?.gridDivisions || 20),
+            gridMajor,
+            gridMinor
+        );
+        grid.visible = this.viewerConfig?.helpers?.showGrid !== false;
+        grid.rotation.x = 0;
+        grid.position.y = -500;
+        return grid;
+    }
+
+    _rebuildGridHelper(themeStyle) {
+        if (this._gridHelper) {
+            this.scene.remove(this._gridHelper);
+            if (this._gridHelper.geometry) this._gridHelper.geometry.dispose();
+            if (Array.isArray(this._gridHelper.material)) {
+                this._gridHelper.material.forEach((m) => m?.dispose?.());
+            } else if (this._gridHelper.material) {
+                this._gridHelper.material.dispose();
+            }
+            this._gridHelper = null;
+        }
+
+        this._gridHelper = this._buildGridHelper(themeStyle);
+        this.scene.add(this._gridHelper);
+    }
+
+    _applyThemeAppearance() {
+        const themeStyle = this._resolveThemeStyle();
+        const bgConfig = String(this.viewerConfig?.scene?.background || 'auto').toLowerCase();
+
+        if (bgConfig === 'auto') {
+            this.scene.background = new THREE.Color(themeStyle.background);
+            if (this.renderer) this.renderer.setClearAlpha(1);
+        } else {
+            this.scene.background = new THREE.Color(this.viewerConfig?.scene?.background);
+            if (this.renderer) this.renderer.setClearAlpha(1);
+        }
+
+        if (this._gridHelper) {
+            this._rebuildGridHelper(themeStyle);
+        }
+
+        if (this._heatmapPanelEl) {
+            this._heatmapPanelEl.style.background = themeStyle.panelBg;
+            this._heatmapPanelEl.style.color = themeStyle.panelText;
+        }
+
+        this._queueOverlayRefresh();
+    }
+
+    setTheme(themeKey) {
+        const next = String(themeKey || 'NavisDark');
+        this.viewerConfig.scene = {
+            ...(this.viewerConfig.scene || {}),
+            themePreset: next,
+        };
+
+        // Update scene-level styling immediately.
+        this._palette = this._resolvePalette();
+        this._applyThemeAppearance();
+
+        // Re-render cached components so mesh materials are rebuilt with the new palette.
+        if (Array.isArray(this._lastComponentsCache)) {
+            this.render(this._lastComponentsCache);
+        }
     }
 
     _emitTrace(type, payload = {}) {

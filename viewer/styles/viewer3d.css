@@ -807,3 +807,238 @@
     font-size: 11px;
   }
 }
+
+/* ── UI Themes ──────────────────────────────────────────────────── */
+
+/* Light Theme (DrawLight) */
+.geo-theme-drawlight.geo-tab {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+.geo-theme-drawlight .geo-top-ribbon {
+  background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
+  border-bottom: 1px solid #cbd5e1;
+}
+.geo-theme-drawlight .geo-left-panel.viewer3d-settings-panel,
+.geo-theme-drawlight .geo-side-panel.viewer3d-summary-panel {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+.geo-theme-drawlight .left-panel-toggle-btn {
+  background: #e2e8f0;
+  border-bottom: 1px solid #cbd5e1;
+  color: #334155;
+}
+.geo-theme-drawlight .left-panel-toggle-btn:hover {
+  background: #cbd5e1;
+  color: #0f172a;
+}
+.geo-theme-drawlight .side-panel-tabs {
+  background: #e2e8f0;
+  border-bottom: 1px solid #cbd5e1;
+}
+.geo-theme-drawlight .panel-tab {
+  color: #64748b;
+}
+.geo-theme-drawlight .panel-tab:hover {
+  color: #3b82f6;
+}
+.geo-theme-drawlight .panel-tab.active {
+  color: #1d4ed8;
+  border-bottom-color: #1d4ed8;
+}
+.geo-theme-drawlight .panel-content {
+  color: #334155;
+}
+.geo-theme-drawlight .geo-status-bar {
+  background: #ffffff;
+  border-top: 1px solid #cbd5e1;
+}
+.geo-theme-drawlight .status-title {
+  color: #0f172a;
+}
+.geo-theme-drawlight .status-separator {
+  background: rgba(0, 0, 0, 0.1);
+}
+.geo-theme-drawlight .status-message {
+  color: #475569;
+}
+.geo-theme-drawlight .left-panel-group {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+}
+.geo-theme-drawlight .left-panel-title,
+.geo-theme-drawlight .left-panel-group-title {
+  color: #475569;
+}
+.geo-theme-drawlight .left-panel-label,
+.geo-theme-drawlight .left-panel-checkbox {
+  color: #1e293b;
+}
+.geo-theme-drawlight .left-panel-label select,
+.geo-theme-drawlight .left-panel-label input[type="number"],
+.geo-theme-drawlight .left-panel-label input[type="text"],
+.geo-theme-drawlight .left-panel-inline-select {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #0f172a;
+}
+.geo-theme-drawlight .left-panel-label select:focus,
+.geo-theme-drawlight .left-panel-label input:focus,
+.geo-theme-drawlight .left-panel-inline-select:focus {
+  border-color: #3b82f6;
+}
+.geo-theme-drawlight .left-panel-range-readout {
+  color: #475569;
+}
+.geo-theme-drawlight .ribbon-action-group {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+}
+.geo-theme-drawlight .ribbon-group-label {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+}
+.geo-theme-drawlight .btn-icon.viewer3d-icon-btn,
+.geo-theme-drawlight .geo-ribbon-utility .viewer3d-mini-icon-btn {
+  color: #475569;
+}
+.geo-theme-drawlight .btn-icon.viewer3d-icon-btn:hover,
+.geo-theme-drawlight .geo-ribbon-utility .viewer3d-mini-icon-btn:hover {
+  background: rgba(59, 130, 246, 0.1);
+  color: #1d4ed8;
+  border-color: rgba(59, 130, 246, 0.3);
+}
+.geo-theme-drawlight .btn-icon.viewer3d-icon-btn.active,
+.geo-theme-drawlight .btn-icon.viewer3d-icon-btn[data-active="true"] {
+  background: rgba(59, 130, 246, 0.15);
+  color: #1e3a8a;
+  border-color: rgba(59, 130, 246, 0.4);
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.3);
+}
+.geo-theme-drawlight .geo-top-ribbon .btn-secondary,
+.geo-theme-drawlight .geo-top-ribbon .file-label {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+}
+.geo-theme-drawlight .geo-top-ribbon .btn-secondary:hover,
+.geo-theme-drawlight .geo-top-ribbon .file-label:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+  border-color: #94a3b8;
+}
+.geo-theme-drawlight .ribbon-toggle-btn {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+}
+.geo-theme-drawlight .ribbon-toggle-btn:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+  border-color: #94a3b8;
+}
+/* Force black chevron for select in light theme */
+.geo-theme-drawlight .left-panel-label select,
+.geo-theme-drawlight .left-panel-inline-select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23334155' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 10px 6px;
+  padding-right: 24px;
+}
+/* Custom Scrollbars for light theme */
+.geo-theme-drawlight .left-panel-body::-webkit-scrollbar-thumb,
+.geo-theme-drawlight .viewer3d-ribbon-actions::-webkit-scrollbar-thumb,
+.geo-theme-drawlight .panel-content::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+}
+.geo-theme-drawlight .left-panel-body:hover::-webkit-scrollbar-thumb,
+.geo-theme-drawlight .panel-content:hover::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.6);
+}
+
+/* High Contrast Theme */
+.geo-theme-highcontrast.geo-tab {
+  background: #000000;
+  color: #ffffff;
+}
+.geo-theme-highcontrast .geo-top-ribbon,
+.geo-theme-highcontrast .geo-left-panel.viewer3d-settings-panel,
+.geo-theme-highcontrast .geo-side-panel.viewer3d-summary-panel,
+.geo-theme-highcontrast .geo-status-bar,
+.geo-theme-highcontrast .left-panel-group,
+.geo-theme-highcontrast .ribbon-action-group,
+.geo-theme-highcontrast .side-panel-tabs {
+  background: #000000;
+  border-color: #3f3f3f;
+}
+.geo-theme-highcontrast .left-panel-title,
+.geo-theme-highcontrast .left-panel-group-title,
+.geo-theme-highcontrast .status-title {
+  color: #ffffff;
+}
+.geo-theme-highcontrast .status-separator {
+  background: #3f3f3f;
+}
+.geo-theme-highcontrast .status-message,
+.geo-theme-highcontrast .left-panel-label,
+.geo-theme-highcontrast .left-panel-checkbox,
+.geo-theme-highcontrast .panel-tab {
+  color: #e0e0e0;
+}
+.geo-theme-highcontrast .left-panel-label select,
+.geo-theme-highcontrast .left-panel-label input[type="number"],
+.geo-theme-highcontrast .left-panel-label input[type="text"],
+.geo-theme-highcontrast .left-panel-inline-select {
+  background: #0a0a0a;
+  border: 1px solid #555555;
+  color: #ffffff;
+}
+.geo-theme-highcontrast .left-panel-label select:focus,
+.geo-theme-highcontrast .left-panel-label input:focus,
+.geo-theme-highcontrast .left-panel-inline-select:focus {
+  border-color: #ffffff;
+}
+.geo-theme-highcontrast .ribbon-group-label {
+  background: #111111;
+  color: #ffffff;
+  border: 1px solid #555555;
+}
+.geo-theme-highcontrast .panel-tab.active {
+  color: #ffffff;
+  border-bottom-color: #ffffff;
+}
+.geo-theme-highcontrast .btn-icon.viewer3d-icon-btn,
+.geo-theme-highcontrast .geo-ribbon-utility .viewer3d-mini-icon-btn {
+  color: #cccccc;
+}
+.geo-theme-highcontrast .btn-icon.viewer3d-icon-btn:hover,
+.geo-theme-highcontrast .geo-ribbon-utility .viewer3d-mini-icon-btn:hover {
+  background: #1a1a1a;
+  color: #ffffff;
+  border-color: #666666;
+}
+.geo-theme-highcontrast .btn-icon.viewer3d-icon-btn.active,
+.geo-theme-highcontrast .btn-icon.viewer3d-icon-btn[data-active="true"] {
+  background: #222222;
+  color: #ffffff;
+  border-color: #ffffff;
+}
+.geo-theme-highcontrast .geo-top-ribbon .btn-secondary,
+.geo-theme-highcontrast .geo-top-ribbon .file-label,
+.geo-theme-highcontrast .ribbon-toggle-btn,
+.geo-theme-highcontrast .left-panel-toggle-btn {
+  background: #111111;
+  border: 1px solid #555555;
+  color: #cccccc;
+}
+.geo-theme-highcontrast .geo-top-ribbon .btn-secondary:hover,
+.geo-theme-highcontrast .geo-top-ribbon .file-label:hover,
+.geo-theme-highcontrast .ribbon-toggle-btn:hover,
+.geo-theme-highcontrast .left-panel-toggle-btn:hover {
+  background: #222222;
+  color: #ffffff;
+  border-color: #ffffff;
+}

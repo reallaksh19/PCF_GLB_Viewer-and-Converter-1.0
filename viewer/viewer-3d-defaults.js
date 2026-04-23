@@ -32,18 +32,7 @@ export const DEFAULT_VIEWER3D_CONFIG = {
     gridPlane: 'auto',
     syncGizmoLabels: true,
   },
-  palette: {
-    PIPE: '#1e90ff',
-    FLANGE: '#ff4500',
-    VALVE: '#32cd32',
-    TEE: '#ffd700',
-    ELBOW: '#8a2be2',
-    BEND: '#8a2be2',
-    REDUCER: '#ff69b4',
-    SUPPORT: '#00c853',
-    ANCI: '#ff3b30',
-    UNKNOWN: '#d3d3d3',
-  },
+  // palette intentionally left out here to allow THEME_PALETTES to dictate colors
   scene: {
     themePreset: 'NavisDark',
     background: 'auto',
@@ -98,7 +87,7 @@ export const DEFAULT_VIEWER3D_CONFIG = {
       max: 1.9,
     },
     annotations: {
-      messageSquareEnabled: true,
+      messageSquareEnabled: false,
     },
   },
   componentGeometry: {
@@ -247,9 +236,10 @@ export const DEFAULT_VIEWER3D_CONFIG = {
   lengthLabels: {
     enabled: false,
     precision: 1,
-    maxLabels: 500,
-    minWorldGap: 90,
+    maxLabels: 9999,
+    minWorldGap: 30,
     offsetScale: 1,
+    verificationMode: false,
   },
   heatmap: {
     enabled: false,
@@ -293,5 +283,74 @@ export const DEFAULT_VIEWER3D_CONFIG = {
       fileName: 'STEAM_SISO - Copy.pcf',
       pcfText: '',
     },
+  },
+};
+
+export const THEME_PALETTES = {
+  NavisDark: {
+    PIPE:     '#66d9ff',
+    FLANGE:   '#ffb25c',
+    VALVE:    '#72e39a',
+    TEE:      '#ffe07a',
+    ELBOW:    '#d0a8ff',
+    BEND:     '#d0a8ff',
+    REDUCER:  '#ff9dc7',
+    SUPPORT:  '#8af58d',
+    ANCI:     '#ff7878',
+    UNKNOWN:  '#d6e2ee',
+  },
+  HighContrast: {
+    PIPE:     '#79ecff',
+    FLANGE:   '#ff9d2e',
+    VALVE:    '#76ff9a',
+    TEE:      '#fff06a',
+    ELBOW:    '#f08cff',
+    BEND:     '#f08cff',
+    REDUCER:  '#ff5ca8',
+    SUPPORT:  '#b7ff2a',
+    ANCI:     '#ff4d4d',
+    UNKNOWN:  '#ffffff',
+  },
+  DrawLight: {
+    PIPE:     '#0c4f8a',
+    FLANGE:   '#b6631c',
+    VALVE:    '#1d7d4d',
+    TEE:      '#a88416',
+    ELBOW:    '#6d4aa6',
+    BEND:     '#6d4aa6',
+    REDUCER:  '#b74d7d',
+    SUPPORT:  '#2e6e58',
+    ANCI:     '#bb2f2f',
+    UNKNOWN:  '#5f6f7f',
+  },
+};
+
+export const THEME_SCENE_STYLES = {
+  NavisDark: {
+    background: '#08111c',
+    gridMajor: '#41566f',
+    gridMinor: '#223447',
+    labelText: '#eef6ff',
+    labelBg: '#0f1b2bcc',
+    panelBg: '#0f1726dd',
+    panelText: '#eef6ff',
+  },
+  HighContrast: {
+    background: '#03060b',
+    gridMajor: '#546276',
+    gridMinor: '#2b3442',
+    labelText: '#ffffff',
+    labelBg: '#0a0f18ee',
+    panelBg: '#090e16ee',
+    panelText: '#ffffff',
+  },
+  DrawLight: {
+    background: '#f4f7fb',
+    gridMajor: '#bcc9d6',
+    gridMinor: '#dfe7ef',
+    labelText: '#1f2937',
+    labelBg: '#ffffffdd',
+    panelBg: '#ffffffee',
+    panelText: '#1f2937',
   },
 };

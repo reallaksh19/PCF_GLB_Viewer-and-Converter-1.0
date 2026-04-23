@@ -47,6 +47,7 @@ export function parseXmlElements(rawText, log) {
   const restraints = [];
   const forces     = [];
   const rigids     = [];
+  const meta       = {};
 
   let doc;
   try {
@@ -64,6 +65,11 @@ export function parseXmlElements(rawText, log) {
   if (model) {
     const jobName = model.getAttribute('JOBNAME') ?? '—';
     const numElt  = model.getAttribute('NUMELT') ?? '?';
+    meta.jobName = jobName;
+    meta.numElt = Number(numElt || 0);
+    meta.northX = attrNum(model, 'NORTH_X');
+    meta.northY = attrNum(model, 'NORTH_Y');
+    meta.northZ = attrNum(model, 'NORTH_Z');
     log.push({ level: 'INFO', msg: `XML PIPINGMODEL: JOBNAME="${jobName}" | NUMELT=${numElt}` });
   }
 
@@ -163,6 +169,8 @@ export function parseXmlElements(rawText, log) {
 
     const len = pipeLength(dx, dy, dz);
 
+    const ownName = attrStr(el, 'NAME');
+    const ownLineNo = attrStr(el, 'LINE_NO') || attrStr(el, 'LINE-NO') || attrStr(el, 'LINE_NO_KEY') || attrStr(el, 'LINE-NO-KEY');
     const element = {
       index: idx, from, to, dx, dy, dz,
       od, wall, insul, corrosion,
@@ -171,6 +179,8 @@ export function parseXmlElements(rawText, log) {
       P_hydro: Phyd,
       E_cold, E_hot, density, insulDensity, fluidDensity, poisson,
       material: matName,
+      name: ownName || '',
+      lineNo: ownLineNo || '',
       length: len,
       fromPos: { ...origin },
       toPos:   { ...toPos },
@@ -251,5 +261,5 @@ export function parseXmlElements(rawText, log) {
     log.push({ level: 'INFO', msg: `XML ELEMENTS: Materials → ${mats.join(', ')}` });
   }
 
-  return { elements, nodes, bends, restraints, forces, rigids };
+  return { elements, nodes, bends, restraints, forces, rigids, meta, format: 'XML' };
 }

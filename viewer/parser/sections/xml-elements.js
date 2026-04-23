@@ -18,6 +18,18 @@
  */
 
 import { pipeLength } from '../../utils/formatter.js';
+import { debugSupport } from '../../debug/support-debug.js';
+
+function _axisBucket(axis) {
+  if (!axis) return 'none';
+  const x = Math.abs(Number(axis.x || 0));
+  const y = Math.abs(Number(axis.y || 0));
+  const z = Math.abs(Number(axis.z || 0));
+  if (y >= x && y >= z) return 'Y';
+  if (x >= y && x >= z) return 'X';
+  if (z >= x && z >= y) return 'Z';
+  return 'mixed';
+}
 
 const SENTINEL = -1.0101;
 const isSentinel = v => Math.abs(v - SENTINEL) < 0.001;
@@ -47,6 +59,7 @@ export function parseXmlElements(rawText, log) {
   const restraints = [];
   const forces     = [];
   const rigids     = [];
+  const meta       = {};
 
   let doc;
   try {
@@ -60,10 +73,21 @@ export function parseXmlElements(rawText, log) {
   }
 
   // Model metadata
+  let north = { x: 0, y: 0, z: -1 };
   const model = doc.querySelector('PIPINGMODEL');
   if (model) {
     const jobName = model.getAttribute('JOBNAME') ?? '—';
     const numElt  = model.getAttribute('NUMELT') ?? '?';
+    meta.jobName = jobName;
+    meta.numElt = Number(numElt || 0);
+    meta.northX = attrNum(model, 'NORTH_X');
+    meta.northY = attrNum(model, 'NORTH_Y');
+    meta.northZ = attrNum(model, 'NORTH_Z');
+    
+    if (meta.northX !== null && meta.northY !== null && meta.northZ !== null) {
+      north = { x: meta.northX, y: meta.northY, z: meta.northZ };
+    }
+    
     log.push({ level: 'INFO', msg: `XML PIPINGMODEL: JOBNAME="${jobName}" | NUMELT=${numElt}` });
   }
 
@@ -105,6 +129,19 @@ export function parseXmlElements(rawText, log) {
     const patchDofs = Array.isArray(patch?.dofs)
       ? [...new Set(patch.dofs.map((d) => Number(d)).filter((d) => Number.isFinite(d)).map((d) => Math.trunc(d)))]
       : [];
+
+    debugSupport({
+      stage: 'xml-parse',
+      sourceId: `xml-restraint-${node}`,
+      nodeId: node,
+      rawType: String(patch?.rawType || patch?.type || ''),
+      supportBlock: String(patch?.supportBlock || ''),
+      typeCode: patch?.typeCode ?? '',
+      dofs: patchDofs,
+      axisCosines: patch?.axisCosines || null,
+      axisBucket: _axisBucket(patch?.axisCosines),
+    });
+
     if (!existing) {
       xmlRestraintByNode.set(node, {
         ptr: 0,
@@ -120,6 +157,7 @@ export function parseXmlElements(rawText, log) {
         friction: Number.isFinite(Number(patch?.friction)) ? Number(patch.friction) : null,
         gap: Number.isFinite(Number(patch?.gap)) ? Number(patch.gap) : null,
         guid: String(patch?.guid || ''),
+        typeCode: Number.isFinite(Number(patch?.typeCode)) ? Number(patch.typeCode) : null,
       });
       return;
     }
@@ -129,6 +167,9 @@ export function parseXmlElements(rawText, log) {
     if (patch?.supportDescription && !existing.supportDescription) existing.supportDescription = String(patch.supportDescription);
     if (patch?.axisCosines && !existing.axisCosines) existing.axisCosines = patch.axisCosines;
     if (!existing.guid && patch?.guid) existing.guid = String(patch.guid);
+    if (existing.typeCode == null && Number.isFinite(Number(patch?.typeCode))) {
+      existing.typeCode = Number(patch.typeCode);
+    }
     if (patchDofs.length) {
       existing.dofs = [...new Set([...(existing.dofs || []), ...patchDofs])].sort((a, b) => a - b);
     }
@@ -200,6 +241,8 @@ export function parseXmlElements(rawText, log) {
 
     const len = pipeLength(dx, dy, dz);
 
+    const ownName = attrStr(el, 'NAME');
+    const ownLineNo = attrStr(el, 'LINE_NO') || attrStr(el, 'LINE-NO') || attrStr(el, 'LINE_NO_KEY') || attrStr(el, 'LINE-NO-KEY');
     const element = {
       index: idx, from, to, dx, dy, dz,
       od, wall, insul, corrosion,
@@ -208,6 +251,8 @@ export function parseXmlElements(rawText, log) {
       P_hydro: Phyd,
       E_cold, E_hot, density, insulDensity, fluidDensity, poisson,
       material: matName,
+      name: ownName || '',
+      lineNo: ownLineNo || '',
       length: len,
       fromPos: { ...origin },
       toPos:   { ...toPos },
@@ -312,6 +357,7 @@ export function parseXmlElements(rawText, log) {
       friction: attrNum(r, 'FRIC_COEF'),
       gap: attrNum(r, 'GAP'),
       guid,
+      typeCode: Number.isFinite(typeCode) ? typeCode : null,
     });
   });
 
@@ -360,5 +406,5 @@ export function parseXmlElements(rawText, log) {
     log.push({ level: 'INFO', msg: `XML ELEMENTS: Materials → ${mats.join(', ')}` });
   }
 
-  return { elements, nodes, bends, restraints, forces, rigids };
+  return { elements, nodes, bends, restraints, forces, rigids, meta, format: 'XML', north };
 }

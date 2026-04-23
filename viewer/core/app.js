@@ -4,6 +4,7 @@ import { renderViewer3D } from '../tabs/viewer3d-tab.js';
 import { renderAdvancedGlbViewerPanel } from '../js/pcf2glb/ui/AdvancedGlbViewerPanel.js';
 import { renderPcfxConverterTab } from '../tabs/pcfx-converter-tab.js';
 import { emit } from './event-bus.js';
+import { initDevDebugWindow, destroyDevDebugWindow } from '../debug/dev-debug-window.js';
 
 const TAB_CONFIG_URL = './opt/tab-visibility.json';
 
@@ -20,8 +21,14 @@ let _visibleTabs = [...TABS];
 
 export async function init() {
   loadStickyState();
+  if (IS_DEV) {
+    try { destroyDevDebugWindow(); } catch {}
+  }
   _visibleTabs = await _loadVisibleTabs();
   _buildTabBar();
+  if (IS_DEV) {
+    initDevDebugWindow();
+  }
   _switchTab(_resolveInitialTabId());
 }
 
