@@ -1,7 +1,8 @@
-import { createResultEnvelope } from './calc-types.js';
+import { createResultEnvelope, buildCalcResult } from './calc-types.js';
 import { addLog, CATEGORY, SEVERITY } from '../../core/logger.js';
 
 export function runCalculation(calcModule, rawInputs, unitMode = 'Native') {
+  const t0 = performance.now();
   const envelope = createResultEnvelope();
   envelope.metadata.id = calcModule.id || 'unknown';
   envelope.metadata.name = calcModule.name || 'Unknown Calc';
@@ -57,5 +58,13 @@ export function runCalculation(calcModule, rawInputs, unitMode = 'Native') {
     });
   });
 
-  return envelope;
+    const t1 = performance.now();
+  return buildCalcResult({
+      name: envelope.metadata.name,
+      inputs: { ...envelope.inputs, unitMode: envelope.metadata.unitMode },
+      outputs: envelope.outputs,
+      warnings: envelope.warnings || [],
+      steps: envelope.steps || [],
+      benchmark: { durationMs: t1 - t0 }
+  });
 }

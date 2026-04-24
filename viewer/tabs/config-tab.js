@@ -1,3 +1,4 @@
+import { RuntimeEvents } from '../contracts/runtime-events.js';
 /**
  * config-tab.js - Dedicated UI for viewer3DConfig.
  */
@@ -7,6 +8,7 @@ import { emit, on } from '../core/event-bus.js';
 import { DEFAULT_VIEWER3D_CONFIG, VIEWER_ACTION_IDS } from '../viewer-3d-defaults.js';
 import { getPcfMapping, savePcfMapping, getCaesarMatchAttribute, saveCaesarMatchAttribute, getSupportKindMap, saveSupportKindMap } from '../core/settings.js';
 import { updateViewer3DConfig } from '../viewer-3d-config.js';
+import { notify } from '../diagnostics/notification-center.js';
 
 let _listenersRegistered = false;
 
@@ -223,7 +225,7 @@ export function renderConfig(container) {
   container.querySelector('#cfg-reset-viewer')?.addEventListener('click', () => {
     state.viewer3DConfig = clone(DEFAULT_VIEWER3D_CONFIG);
     saveStickyState();
-    emit('viewer3d-config-changed', { source: 'config-tab', reason: 'reset-all' });
+    emit(RuntimeEvents.VIEWER3D_CONFIG_CHANGED, { source: 'config-tab', reason: 'reset-all' });
   });
 
   container.querySelector('#cfg-reset-cam')?.addEventListener('click', () => {
@@ -234,7 +236,7 @@ export function renderConfig(container) {
       presets: clone(DEFAULT_VIEWER3D_CONFIG.presets),
     });
     saveStickyState();
-    emit('viewer3d-config-changed', { source: 'config-tab', reason: 'reset-camera-nav' });
+    emit(RuntimeEvents.VIEWER3D_CONFIG_CHANGED, { source: 'config-tab', reason: 'reset-camera-nav' });
   });
 
   container.querySelector('#cfg-import-json')?.addEventListener('click', () => {
@@ -243,9 +245,9 @@ export function renderConfig(container) {
       const parsed = JSON.parse(txt);
       state.viewer3DConfig = updateViewer3DConfig(DEFAULT_VIEWER3D_CONFIG, parsed);
       saveStickyState();
-      emit('viewer3d-config-changed', { source: 'config-tab', reason: 'import-json' });
+      emit(RuntimeEvents.VIEWER3D_CONFIG_CHANGED, { source: 'config-tab', reason: 'import-json' });
     } catch (e) {
-      alert(`Invalid JSON: ${e.message}`);
+      notify({ level: 'error', title: 'Invalid JSON', message: e.message });
     }
   });
 
@@ -263,7 +265,7 @@ export function renderConfig(container) {
       if (container.querySelector('#cfg-mock2-file')) container.querySelector('#cfg-mock2-file').value = String(mock2.fileName || '');
       if (container.querySelector('#cfg-mock2-pcf')) container.querySelector('#cfg-mock2-pcf').value = String(mock2.pcfText || '');
     } catch (error) {
-      alert(`Failed to load seeded mock data: ${String(error?.message || error)}`);
+      notify({ level: 'error', title: 'Mock Load Error', message: `Failed to load seeded mock data: ${String(error?.message || error)}` });
     }
   });
 
@@ -299,7 +301,7 @@ export function renderConfig(container) {
     const attr = container.querySelector('#cfg-caesar-match-attr').value.trim();
     if (attr) {
       saveCaesarMatchAttribute(attr);
-      alert('CAESAR Match Attribute saved.');
+      notify({ level: 'success', title: 'Saved', message: 'CAESAR Match Attribute saved.' });
     }
   });
 
@@ -310,7 +312,7 @@ export function renderConfig(container) {
       newMapping[input.dataset.key] = input.value.trim();
     });
     savePcfMapping(newMapping);
-    alert('PCF Mapping saved successfully.');
+    notify({ level: 'success', title: 'Saved', message: 'PCF Mapping saved successfully.' });
   });
 
   container.querySelector('#export-mapping-btn')?.addEventListener('click', () => {
@@ -397,7 +399,7 @@ function _applyForm(container) {
 
   state.viewer3DConfig = updateViewer3DConfig(state.viewer3DConfig, patch);
   saveStickyState();
-  emit('viewer3d-config-changed', { source: 'config-tab', reason: 'apply' });
+  emit(RuntimeEvents.VIEWER3D_CONFIG_CHANGED, { source: 'config-tab', reason: 'apply' });
 }
 
 // ─── Support Kind Map helpers ─────────────────────────────────────────────────

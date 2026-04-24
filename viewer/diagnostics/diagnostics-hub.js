@@ -1,12 +1,16 @@
-/**
- * viewer/diagnostics/diagnostics-hub.js
- *
- * Minimal contract host for diagnostics tracking.
- * Plugs into the event bus to listen for system-wide diagnostic events.
- * Will be fully implemented by Agent A5.
- */
-import { on } from '../core/event-bus.js';
+import { addLog, addTraceEvent } from '../core/logger.js';
+import { emit } from '../core/event-bus.js';
 import { RuntimeEvents } from '../contracts/runtime-events.js';
+
+export function publishDiagnostic(entry) {
+  if (entry.kind === 'trace') {
+    addTraceEvent(entry);
+  } else {
+    const logEntry = { ...entry, message: entry.code ? `[${entry.code}] ${entry.message}` : entry.message };
+    addLog(logEntry);
+  }
+  emit(RuntimeEvents.DIAGNOSTIC_EVENT, entry);
+}
 
 export const DiagnosticsHub = {
   snapshots: [],
@@ -16,11 +20,5 @@ export const DiagnosticsHub = {
       name,
       data
     });
-    // In future versions, this will trigger UI updates for diagnostic tabs.
   }
 };
-
-// Listen for global diagnostic events
-on(RuntimeEvents.DIAGNOSTIC_EVENT, (payload) => {
-  DiagnosticsHub.captureSnapshot(payload?.name || 'UNKNOWN', payload?.data || {});
-});

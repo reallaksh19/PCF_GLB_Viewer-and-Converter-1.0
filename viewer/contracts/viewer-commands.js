@@ -26,15 +26,15 @@ export function dispatchViewerCommand(ctx, cmd) {
     case ViewerCommand.FIT_SELECTION:
       return ctx.viewer.fitSelection?.();
     case ViewerCommand.TOGGLE_SECTION:
-      return ctx.viewer.toggleSectionMode?.();
+      if (cmd.payload?.mode) { return ctx.viewer.setSectionMode?.(cmd.payload.mode); } return ctx.viewer.disableSection?.();
     case ViewerCommand.TOGGLE_MEASURE:
-      return ctx.viewer.toggleMeasureMode?.();
+      const curMode = ctx.viewer.getNavMode?.(); return ctx.viewer.setNavMode?.(curMode === 'measure' ? 'orbit' : 'measure');
     case ViewerCommand.SET_VIEW_MODE:
-      return ctx.viewer.setView?.(cmd.payload?.mode);
+      if (cmd.payload?.mode === 'snap') { return ctx.viewer.snapToPreset?.(cmd.payload.preset); } return ctx.viewer.setNavMode?.(cmd.payload?.mode);
     case ViewerCommand.CLEAR_SELECTION:
       return ctx.viewer.clearSelection?.();
     case ViewerCommand.TOGGLE_MARQUEE_ZOOM:
-      return ctx.viewer.toggleMarqueeZoom?.();
+      const mMode = ctx.viewer.getNavMode?.(); return ctx.viewer.setNavMode?.(mMode === 'marquee' ? 'orbit' : 'marquee');
     case ViewerCommand.TOGGLE_PROJECTION:
       return ctx.viewer.toggleProjection?.();
     default:

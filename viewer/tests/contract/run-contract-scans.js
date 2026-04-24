@@ -31,23 +31,22 @@ const ALLOWED_LITERAL_EMITS_IN_FILES = ['event-bus.js'];
 let literalEventCount = 0;
 
 jsFiles.forEach(file => {
-  // Only scan viewer folder code
-  if (!file.includes('/viewer/')) return;
+  const relPath = file.replace(rootDir, '');
   const code = fs.readFileSync(file, 'utf8');
   const fileName = path.basename(file);
 
   if (!ALLOWED_LITERAL_EMITS_IN_FILES.includes(fileName)) {
     let match;
     while ((match = emitLiteralRegex.exec(code)) !== null) {
-      if (!file.includes('tests/contract') && !file.includes('A1_')) {
-          console.error(`\u274c FAILED: Literal event emission found in ${file.replace(rootDir, '')}: emit('${match[1]}')`);
+      if (!file.includes('tests/contract') && !file.includes('tests/ci')) {
+          console.error(`\u274c FAILED: Literal event emission found in ${relPath}: emit('${match[1]}')`);
           passed = false;
           literalEventCount++;
       }
     }
     while ((match = onLiteralRegex.exec(code)) !== null) {
-      if (!file.includes('tests/contract') && !file.includes('A1_')) {
-          console.error(`\u274c FAILED: Literal event listener found in ${file.replace(rootDir, '')}: on('${match[1]}')`);
+      if (!file.includes('tests/contract') && !file.includes('tests/ci')) {
+          console.error(`\u274c FAILED: Literal event listener found in ${relPath}: on('${match[1]}')`);
           passed = false;
           literalEventCount++;
       }

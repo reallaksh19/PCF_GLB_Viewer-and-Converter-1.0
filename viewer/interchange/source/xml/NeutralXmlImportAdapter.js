@@ -4,6 +4,15 @@ import { CanonicalProject } from '../../canonical/CanonicalProject.js';
 export class NeutralXmlImportAdapter {
   static detect(xmlText) {
     return /^\s*</.test(xmlText || '');
+   }
+
+  static detectConfidence(input) {
+    const text = input?.text || '';
+    const name = input?.name || '';
+    if (this.detect(text)) {
+      return /\.xml$/i.test(name) ? 0.9 : 0.8;
+    }
+    return 0;
   }
 
   async import({ id = '', name = 'input.xml', text = '' } = {}) {

@@ -21,3 +21,16 @@ export function createResultEnvelope() {
     pass: true
   };
 }
+
+export function buildCalcResult({ name, inputs, outputs, warnings, steps, benchmark }) {
+  return {
+    ok: true,
+    metadata: { name, unitMode: inputs?.unitMode || 'unknown' },
+    inputs: inputs || {},
+    outputs: outputs || {},
+    warnings: warnings || [],
+    steps: steps || [],
+    benchmark: benchmark || null,
+    ts: new Date().toISOString(),
+  };
+}

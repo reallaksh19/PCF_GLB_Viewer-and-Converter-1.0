@@ -85,8 +85,15 @@ function parseCaesarXml(xmlText) {
 }
 
 export class CaesarXmlImportAdapter {
-  static detect(xmlText) {
-    return /<\s*PIPINGMODEL/i.test(xmlText || '') || /<\s*PIPINGELEMENT/i.test(xmlText || '');
+  static detect(xmlText) { return /<\s*PIPINGMODEL\b/i.test(xmlText || '') || /<\s*PIPINGELEMENT\b/i.test(xmlText || ''); }
+
+  static detectConfidence(input) {
+    const text = input?.text || '';
+    const name = input?.name || '';
+    if (this.detect(text)) {
+      return /\.xml$/i.test(name) ? 0.9 : 0.8;
+    }
+    return 0;
   }
 
   async import({ id = '', name = 'input.xml', text = '' } = {}) {
