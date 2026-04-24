@@ -4,6 +4,10 @@ import { buildGlbCanonicalProject } from '../../builders/glb/glb-metadata-builde
 export class GlbImportAdapter {
   static detect(payload) {
     return !!payload?.isGLB || !!payload?.glb || payload instanceof ArrayBuffer;
+   }
+
+  static detectConfidence(input) {
+    return this.detect(input?.payload) ? 0.9 : 0;
   }
 
   async import({ id = '', name = 'input.glb', payload = null } = {}) {

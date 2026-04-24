@@ -1,3 +1,4 @@
+import { RuntimeEvents } from '../contracts/runtime-events.js';
 /**
  * debug-tab.js — Rich parser log, report population summary, computation details,
  *                validation errors, and raw parsed JSON viewer.
@@ -8,7 +9,6 @@ import { on } from '../core/event-bus.js';
 import { prettyUnit, unitSuffix } from '../utils/formatter.js';
 import { buildUniversalCSV, normalizeToPCF, buildPcfFromContinuity } from '../utils/accdb-to-pcf.js';
 import { calcHistory } from '../calc/core/calc-session.js';
-import { buildCurrentReportData } from '../data/report-data.js';
 
 let _listenersRegistered = false;
 
@@ -289,7 +289,7 @@ function _render(container) {
     // Trigger re-renders if elements changed
     if (hasChanges) {
         import('../core/event-bus.js').then(({ emit }) => {
-          emit('parse-complete', parsed);
+          emit(RuntimeEvents.PARSE_COMPLETE, parsed);
         });
     }
   });
@@ -706,14 +706,4 @@ function _jsonSection(parsed, section) {
 
 function _esc(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-
-export function exportDebugSnapshot() {
-  return {
-    parsed: state.parsed,
-    errors: state.errors,
-    calcHistory,
-    reportData: buildCurrentReportData ? buildCurrentReportData(state) : null,
-  };
 }

@@ -1,3 +1,4 @@
+import { RuntimeEvents } from '../contracts/runtime-events.js';
 /**
  * summary-tab.js — Cover page with scope toggles.
  */
@@ -113,7 +114,7 @@ export function renderSummary(container) {
       state.scopeToggles[id] = e.target.checked;
       const row = container.querySelector(`.scope-row[data-id="${id}"]`);
       _updateScopeRow(row, e.target.checked);
-      emit('scope-changed', { id, value: e.target.checked });
+      emit(RuntimeEvents.SCOPE_CHANGED, { id, value: e.target.checked });
     });
   });
 
@@ -126,7 +127,7 @@ export function renderSummary(container) {
         if (key === 'docNo') {
           state.sticky.docNoInitialized = true;
           f.classList.remove('uninitialized');
-          emit('docno-changed', state.sticky.docNo);
+          emit(RuntimeEvents.DOCNO_CHANGED, state.sticky.docNo);
         }
         import('../core/state.js').then(m => m.saveStickyState());
       }

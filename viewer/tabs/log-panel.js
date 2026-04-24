@@ -1,3 +1,4 @@
+import { RuntimeEvents } from '../contracts/runtime-events.js';
 /**
  * log-panel.js — Collapsible bottom-docked detail log panel for diagnostics.
  */
@@ -229,14 +230,14 @@ function _showDetail(id) {
         const tgtLog = logs.find(l => l.id === id);
         if (tgtLog) {
             tgtLog.resolved = !tgtLog.resolved;
-            emit('log-resolved', tgtLog);
+            emit(RuntimeEvents.LOG_RESOLVED, tgtLog);
             _updateDOM();
         }
     });
 
     pane.querySelector('#log-jump-btn')?.addEventListener('click', () => {
         if (log.objectId || log.rowId) {
-            emit('jump-to-object', log.objectId || log.rowId);
+            emit(RuntimeEvents.JUMP_TO_OBJECT, log.objectId || log.rowId);
         }
     });
 }

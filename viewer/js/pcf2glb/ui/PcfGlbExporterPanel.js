@@ -1,3 +1,4 @@
+import { notify } from '../../diagnostics/notification-center.js';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -360,7 +361,7 @@ export function renderPcfGlbExporterPanel(container) {
         // File size guard
         const mb = currentFile.size / (1024 * 1024);
         if (mb > 20) {
-            alert("File is over 20MB. In a real environment, this requires a Web Worker.");
+            notify("File is over 20MB. In a real environment, this requires a Web Worker.");
         } else if (mb > 5) {
             if (!confirm("File is over 5MB. Parsing may freeze the browser briefly. Continue?")) {
                 return;
